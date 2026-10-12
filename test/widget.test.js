@@ -106,3 +106,62 @@ test('a refusal shows the fixed next-step card after the reply, and a busy turn 
   assert.match(w.qa('busy')[0].textContent, /busy/i);
   assert.equal(w.qa('next-step').length, 2);
 });
+
+test('the human chip is on screen from the start, outside the transcript, and calm', async (t) => {
+  const svc = await startService();
+  t.after(svc.close);
+  const w = await openWidget(svc.baseUrl);
+
+  const chip = w.q('human-chip');
+  assert.ok(chip);
+  assert.equal(chip.textContent, 'Talk to a human agent');
+  assert.equal(chip.dataset.prominent, 'false');
+  assert.equal(w.q('messages').contains(chip), false);
+});
+
+test('the chip becomes prominent on a cue, stays so through a calm turn, and follows the reply language', async (t) => {
+  const svc = await startService({ model: createFakeModel(['I am sorry to hear that.', 'Open Transfers.']) });
+  t.after(svc.close);
+  const w = await openWidget(svc.baseUrl);
+
+  await w.send('I sent money to the wrong person');
+  await w.until(() => w.q('human-chip').dataset.prominent === 'true');
+
+  await w.send('ok merci, et comment faire un virement ?');
+  await w.until(() => w.q('human-chip').textContent === 'Parler à un agent');
+  assert.equal(w.q('human-chip').dataset.prominent, 'true', 'once prominent in a conversation it stays prominent');
+});
+
+test('clicking the chip only emits the handoff-request event with the conversation id, and calls no service', async (t) => {
+  const svc = await startService({ model: createFakeModel(['Sorry.']) });
+  t.after(svc.close);
+  const w = await openWidget(svc.baseUrl);
+  const heard = [];
+  w.document.addEventListener('bank-assistant:handoff-request', (e) => heard.push(e.detail));
+
+  await w.send('Fraud on my account');
+  await w.until(() => w.q('human-chip').dataset.prominent === 'true');
+  const fetched = [];
+  const realFetch = w.dom.window.fetch;
+  w.dom.window.fetch = (...args) => { fetched.push(args); return realFetch(...args); };
+  assert.deepEqual(heard, [], 'no event before a click');
+
+  w.q('human-chip').click();
+
+  assert.equal(heard.length, 1);
+  assert.match(heard[0].conversationId, /^[0-9a-f-]{36}$/);
+  assert.deepEqual(fetched, []);
+});
+
+test('the chip works before any message and reports no conversation yet', async (t) => {
+  const svc = await startService();
+  t.after(svc.close);
+  const w = await openWidget(svc.baseUrl);
+  const heard = [];
+  w.document.addEventListener('bank-assistant:handoff-request', (e) => heard.push(e.detail));
+
+  w.q('human-chip').click();
+
+  assert.equal(heard.length, 1);
+  assert.equal(heard[0].conversationId, null);
+});

@@ -6,6 +6,7 @@ import { WARNING, shield } from './shield.js';
 import { BUSY, LimitError, createLimiter } from './limits.js';
 import { parseRefusal, refusalCard } from './refusals.js';
 import { BLOCKED, createOutputFilter } from './filter.js';
+import { chipState, cuesIn, parseEscalate, questionKey } from './chip.js';
 import { PROTECTED_TEXTS, modelHistory, UNSUPPORTED_ID, answerMessages, routerMessages } from './prompts.js';
 
 const PUBLIC = new URL('../public/', import.meta.url);
@@ -93,6 +94,7 @@ export function createService({ model, clock, audit, guides, entitlements, faile
     const text = BUSY[language];
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
     send(res, 'busy', { limit, text, card: refusalCard('off_topic', language) });
+    send(res, 'chip', chipState(['busy']));
     send(res, 'done', { conversationId, language, model: null, offline: false });
     await audit.append({
       time: new Date(clock.now()).toISOString(),
@@ -120,7 +122,7 @@ export function createService({ model, clock, audit, guides, entitlements, faile
     const shielded = shield(body.message);
     const message = shielded.text;
     const conversationId = body.conversationId ?? randomUUID();
-    const conversation = conversations.get(conversationId) ?? { history: [], language: 'en' };
+    const conversation = conversations.get(conversationId) ?? { history: [], language: 'en', asked: new Set() };
     const language = detectLanguage(body.message, conversation.language);
     const limit = limiter.admit(pseudonym(req), body.message.length);
     if (limit) {
@@ -128,6 +130,10 @@ export function createService({ model, clock, audit, guides, entitlements, faile
       return;
     }
     const { history } = conversation;
+    const chipReasons = cuesIn(message);
+    const key = questionKey(message);
+    if (key && conversation.asked.has(key)) chipReasons.push('repeated_question');
+    if (key) conversation.asked.add(key);
     conversation.language = language;
     history.push({ role: 'user', content: message });
     conversations.set(conversationId, conversation);
@@ -149,10 +155,14 @@ export function createService({ model, clock, audit, guides, entitlements, faile
     const answer = async (messages) => {
       let raw = '';
       for await (const text of turnModel.chat({ purpose: 'answer', messages, language, onServed: (info) => { served = info; } })) raw += text;
-      const parsed = parseRefusal(raw);
+      const refused = parseRefusal(raw);
+      const escalated = parseEscalate(refused.text);
+      const parsed = { category: refused.category, text: escalated.text };
+      if (escalated.reason) chipReasons.push(escalated.reason);
       const leak = checkOutput(parsed.text);
       if (leak) {
         filtered = leak;
+        chipReasons.push('blocked');
         reply += BLOCKED[language];
         send(res, 'delta', { text: BLOCKED[language] });
         send(res, 'blocked', { reason: leak, card: refusalCard('off_topic', language) });
@@ -172,6 +182,7 @@ export function createService({ model, clock, audit, guides, entitlements, faile
         guideIds = used.map((g) => g.id);
         send(res, 'guides', { guides: used.map((g) => ({ id: g.id, title: g[language].title })) });
         if (picks.length === 0 && !refusal) {
+          chipReasons.push('no_guide_hit');
           reply += NO_VERIFIED_STEPS[language];
           send(res, 'delta', { text: NO_VERIFIED_STEPS[language] });
           await failedQuestions?.append({ time: new Date(clock.now()).toISOString(), conversationId, tenant: body.tenant ?? null, language, question: message });
@@ -189,6 +200,8 @@ export function createService({ model, clock, audit, guides, entitlements, faile
         await answer(modelHistory(history));
       }
       if (refusal) send(res, 'refusal', { category: refusal, card: refusalCard(refusal, language) });
+      if (refusal) chipReasons.push('refusal');
+      send(res, 'chip', chipState(chipReasons));
       history.push({ role: 'assistant', content: reply });
       send(res, 'done', { conversationId, language: served.offline ? 'en' : language, model: served.model, offline: Boolean(served.offline) });
     } catch (err) {
@@ -196,6 +209,7 @@ export function createService({ model, clock, audit, guides, entitlements, faile
         limited = err.limit;
         reply = BUSY[language];
         send(res, 'busy', { limit: limited, text: reply, card: refusalCard('off_topic', language) });
+        send(res, 'chip', chipState([...chipReasons, 'busy']));
         send(res, 'done', { conversationId, language, model: served.model, offline: false });
       } else {
         outcome = 'error';

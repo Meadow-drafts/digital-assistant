@@ -7,6 +7,7 @@ const TEXT = {
     title: 'Assistant',
     placeholder: 'Ask how to do something…',
     send: 'Send',
+    human: 'Talk to a human agent',
     thinking: 'Thinking…',
     used: 'What I used',
     error: 'The assistant is unavailable right now. Please try again.',
@@ -16,6 +17,7 @@ const TEXT = {
     title: 'Assistant',
     placeholder: 'Demandez comment faire…',
     send: 'Envoyer',
+    human: 'Parler à un agent',
     thinking: 'Réflexion en cours…',
     used: "Ce que j'ai utilisé",
     error: "L'assistant est indisponible pour le moment. Veuillez réessayer.",
@@ -32,6 +34,7 @@ class BankAssistant extends HTMLElement {
         <header data-role="title"></header>
         <div data-role="messages" aria-live="polite"></div>
         <div data-role="thinking" hidden></div>
+        <button data-role="human-chip" type="button" data-prominent="false"></button>
         <form data-role="form">
           <input data-role="input" type="text" maxlength="1000" autocomplete="off" />
           <button data-role="send" type="submit"></button>
@@ -40,6 +43,10 @@ class BankAssistant extends HTMLElement {
       </section>`;
     this.q = (r) => this.querySelector(`[data-role="${r}"]`);
     this.q('form').addEventListener('submit', (e) => { e.preventDefault(); this.submit(); });
+    // The chip only announces the customer's request; the host page starts any handoff.
+    this.q('human-chip').addEventListener('click', () => {
+      this.dispatchEvent(new CustomEvent('bank-assistant:handoff-request', { bubbles: true, detail: { conversationId: this.conversationId } }));
+    });
     this.render();
   }
 
@@ -48,6 +55,7 @@ class BankAssistant extends HTMLElement {
     this.q('title').textContent = t.title;
     this.q('input').placeholder = t.placeholder;
     this.q('send').textContent = t.send;
+    this.q('human-chip').textContent = t.human;
     this.q('thinking').textContent = t.thinking;
     this.q('disclaimer').textContent = t.disclaimer;
     this.q('disclaimer').hidden = false;
@@ -108,6 +116,9 @@ class BankAssistant extends HTMLElement {
         } else if (ev.type === 'busy') {
           this.addMessage('assistant', ev.text).dataset.role = 'busy';
           this.addCard(ev.card);
+        } else if (ev.type === 'chip') {
+          // Prominence is sticky for the conversation: a calm turn never hides a raised chip.
+          if (ev.prominent) this.q('human-chip').dataset.prominent = 'true';
         } else if (ev.type === 'guides') {
           guides = ev.guides;
         } else if (ev.type === 'done') {
