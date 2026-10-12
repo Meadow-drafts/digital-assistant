@@ -14,12 +14,16 @@ import { offeredForms, parsePrefill, validatePrefill } from './prefill.js';
 import { GUIDE_ID, NEXT_STEP, OUTCOMES, TEXT as EXPLAIN_TEXT, parseNext } from './explain.js';
 import { MESSAGES as T1_MESSAGES, TOOL_RULES, UNLOCK_MS, createT1, parseToolCall } from './t1.js';
 import { ownerOf, subjectOf, tokenOf } from './identity.js';
+import { readJson } from './http.js';
+import { createHandoff } from './handoff.js';
 
 const PUBLIC = new URL('../public/', import.meta.url);
 // Only these files are served; no user-controlled path ever reaches the disk.
 const STATIC = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/widget.js': ['widget.js', 'text/javascript; charset=utf-8'],
+  '/console': ['console.html', 'text/html; charset=utf-8'],
+  '/console.js': ['console.js', 'text/javascript; charset=utf-8'],
 };
 // Dev only (TEST_TOKEN / TEST_CLI): puts a real test token and cli on the demo page's widget so a session can start.
 // Never set in production; the token is written into the page, so the page must stay on localhost.
@@ -31,24 +35,6 @@ const devPageHtml = (html, { token, cli, portalFlag }) => {
   const flag = portalFlag && sub ? `<script>try{sessionStorage.setItem('isBalancePinVerified','1');sessionStorage.setItem('isBalancePinVerified:tel',${JSON.stringify(sub)})}catch{}</script>` : '';
   return html.replace('token="demo-token"', `token="${attr(token)}" cli="${attr(cli)}"`).replace('<script src="/widget.js">', `${flag}<script src="/widget.js">`);
 };
-const MAX_BODY = 16 * 1024;
-
-function readJson(req) {
-  return new Promise((resolve, reject) => {
-    let size = 0;
-    const chunks = [];
-    req.on('data', (c) => {
-      size += c.length;
-      if (size > MAX_BODY) { reject(new Error('too large')); req.destroy(); return; }
-      chunks.push(c);
-    });
-    req.on('end', () => {
-      try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch (e) { reject(e); }
-    });
-    req.on('error', reject);
-  });
-}
-
 function send(res, event, data) {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
@@ -95,11 +81,12 @@ async function routeGuides({ model, language, available, guides, history, tools 
   return { picks: [...new Set(picks)].filter((id) => allowed.has(id)).slice(0, MAX_GUIDES), refusal: null };
 }
 
-export function createService({ devPage, model, gateway, clock, audit, guides, navigation, prefill, scamCues, entitlements, failedQuestions, outputAllowlist, limits }) {
+export function createService({ devPage, model, gateway, clock, audit, guides, navigation, prefill, scamCues, entitlements, failedQuestions, outputAllowlist, limits, mailer, agents, consoleUrl }) {
   const t1 = gateway ? createT1({ gateway, clock }) : null;
   const limiter = createLimiter({ clock, limits });
   const checkOutput = createOutputFilter({ allowlist: outputAllowlist, protectedTexts: PROTECTED_TEXTS });
   const conversations = new Map();
+  const handoff = createHandoff({ clock, audit, mailer, agents, consoleUrl, conversations });
 
   // Fail closed: if entitlements cannot be read, offer only guides that need
   // no package, no primary connect and fit the individual role.
@@ -235,6 +222,22 @@ export function createService({ devPage, model, gateway, clock, audit, guides, n
     const conversationId = known ? body.conversationId : randomUUID();
     const conversation = known ?? { owner, history: [], language: 'en', asked: new Set(), session: null };
     const language = detectLanguage(body.message, conversation.language);
+    // With a human agent the bot is muted: the message goes to the agent, nothing is sent to the model.
+    const withAgent = known ? handoff.agentCaseFor(body.conversationId) : null;
+    if (withAgent) {
+      if (message.length > 1000) { res.writeHead(400).end(); return; }
+      handoff.relayToAgent(withAgent, message);
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+      if (shielded.flagged) send(res, 'warning', { code: 'secret_input', text: WARNING[language] });
+      send(res, 'case', { state: 'with_agent', ref: withAgent.ref });
+      send(res, 'done', { conversationId, language, model: null, offline: false });
+      await audit.append({
+        time: new Date(clock.now()).toISOString(), user: pseudonym(req), tenant: body.tenant ?? null, conversationId,
+        userText: message, replyText: '', language, guideIds: [], model: null, latencyMs: 0, outcome: 'relayed_to_agent', caseRef: withAgent.ref,
+      });
+      res.end();
+      return;
+    }
     const limit = limiter.admit(pseudonym(req), body.message.length);
     if (limit) {
       await endBusy(req, res, { limit, conversationId, language, tenant: body.tenant });
@@ -253,6 +256,9 @@ export function createService({ devPage, model, gateway, clock, audit, guides, n
 
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
     send(res, 'thinking', {});
+    // While a case waits for an agent the bot still answers, and says so.
+    const waitingCase = handoff.waitingCaseFor(conversationId);
+    if (waitingCase) send(res, 'case', { state: 'waiting', ref: waitingCase.ref, automated: true });
     if (shielded.flagged) send(res, 'warning', { code: 'secret_input', text: WARNING[language] });
     for (const category of scam) send(res, 'warning', { code: 'scam_cue', category, text: scamCues.warning(category, language) });
     const startedAt = clock.now();
@@ -434,6 +440,7 @@ export function createService({ devPage, model, gateway, clock, audit, guides, n
         send(res, 'error', { code: 'model_unavailable' });
       }
     }
+    if (waitingCase) handoff.mirrorTurn(waitingCase, message, reply);
     await audit.append({
       time: new Date(clock.now()).toISOString(),
       user: pseudonym(req),
@@ -458,6 +465,11 @@ export function createService({ devPage, model, gateway, clock, audit, guides, n
   }
 
   return http.createServer((req, res) => {
+    const fail = () => { if (!res.headersSent) res.writeHead(500); res.end(); };
+    if (/^\/(handoff|case|agent)(\/|\?|$)/.test(req.url)) {
+      handoff(req, res).then((served) => { if (!served) res.writeHead(404).end(); }, fail);
+      return;
+    }
     if (req.method === 'POST' && req.url === '/chat') {
       handleChat(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end(); });
       return;
@@ -470,7 +482,7 @@ export function createService({ devPage, model, gateway, clock, audit, guides, n
       handleSession(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end(); });
       return;
     }
-    const file = req.method === 'GET' ? STATIC[req.url] : undefined;
+    const file = req.method === 'GET' ? STATIC[req.url.split('?')[0]] : undefined;
     if (file) {
       readFile(new URL(file[0], PUBLIC)).then(
         (data) => res.writeHead(200, { 'content-type': file[1] }).end(file[0] === 'index.html' && devPage ? devPageHtml(data.toString(), devPage) : data),

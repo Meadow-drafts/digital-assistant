@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Support console</title>
+  <style>
+    body { font: 14px/1.45 system-ui, sans-serif; margin: 0; background: #f5f4f0; color: #1d1d1b; }
+    main { max-width: 1000px; margin: 0 auto; padding: 1rem; }
+    h1 { font-size: 1.1rem; margin: 0 0 .75rem; }
+    h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: #6b6b66; margin: 0 0 .5rem; }
+    .card { background: #fff; border: 1px solid #dcdad2; border-radius: 8px; padding: .75rem 1rem; }
+    .grid { display: grid; grid-template-columns: 280px 1fr; gap: 1rem; align-items: start; }
+    @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+    [hidden] { display: none !important; }
+    label { display: block; margin: .4rem 0; }
+    input[type=text], input[type=password] { font: inherit; padding: .35rem .5rem; width: 100%; box-sizing: border-box; }
+    button { font: inherit; border: 1px solid #c9c6bb; background: #fff; border-radius: 6px; padding: .3rem .7rem; cursor: pointer; }
+    button:disabled { opacity: .45; cursor: default; }
+    button.primary { background: #0f6b5c; border-color: #0f6b5c; color: #fff; }
+    [data-role="queue"] { display: grid; gap: .4rem; }
+    [data-role="case-row"] { text-align: left; border-radius: 6px; }
+    [data-role="case-row"][aria-current="true"] { border-color: #0f6b5c; background: #ecfdf5; }
+    [data-role="transcript"] { display: grid; gap: .3rem; max-height: 22rem; overflow-y: auto; margin: .5rem 0; }
+    [data-role="line"] { padding: .3rem .6rem; border-radius: 6px; background: #ecebe4; max-width: 85%; white-space: pre-wrap; }
+    [data-role="line"][data-from="customer"] { justify-self: start; background: #fff; border: 1px solid #dcdad2; }
+    [data-role="line"][data-from="agent"] { justify-self: end; background: #dbeafe; }
+    [data-role="line"][data-from="bot"] { background: #eef0f3; }
+    [data-role="line"][data-from="system"] { justify-self: center; background: none; color: #6b6b66; font-style: italic; }
+    .who { display: block; font-size: 11px; color: #6b6b66; }
+    .row { display: flex; gap: .5rem; margin: .25rem 0; }
+    .row input { flex: 1; }
+    .error { color: #b3261e; margin: .25rem 0; min-height: 1em; }
+    .note { color: #6b6b66; font-size: 12px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Support console</h1>
+
+  <form data-role="login-form" class="card" style="max-width: 22rem">
+    <h2>Agent login</h2>
+    <label>Agent id <input data-role="agent-id" type="text" autocomplete="username" /></label>
+    <label>Password <input data-role="agent-password" type="password" autocomplete="current-password" /></label>
+    <button class="primary" type="submit">Sign in</button>
+    <p class="error" data-role="login-error" role="alert"></p>
+  </form>
+
+  <div data-role="console" hidden>
+    <p class="note"><span data-role="agent-name"></span> · <button data-role="logout" type="button">Sign out</button></p>
+    <div class="grid">
+      <section class="card">
+        <h2>Cases</h2>
+        <div data-role="queue"></div>
+        <p class="note" data-role="queue-empty">No cases yet.</p>
+      </section>
+      <section class="card" data-role="detail" hidden>
+        <h2 data-role="detail-ref"></h2>
+        <p>State: <b data-role="detail-state"></b> · Claimed by: <span data-role="detail-claimed-by"></span></p>
+        <div data-role="transcript"></div>
+        <div class="row">
+          <button class="primary" data-role="claim" type="button">Claim this case</button>
+          <button data-role="resolve" type="button">Mark resolved</button>
+        </div>
+        <p class="error" data-role="claim-error" role="alert"></p>
+        <form data-role="reply-form" class="row">
+          <input data-role="reply-input" type="text" maxlength="1000" autocomplete="off" placeholder="Reply to the customer…" />
+          <button data-role="reply-send" type="submit">Send</button>
+        </form>
+      </section>
+    </div>
+  </div>
+</main>
+<script src="/console.js"></script>
+</body>
+</html>

@@ -1,9 +1,9 @@
 import { JSDOM } from 'jsdom';
 
-// Loads the demo host page served by a running service into jsdom, running the
+// Loads a page (the demo host page by default, or /console) served by a running service into jsdom, running the
 // real widget script. Returns helpers to drive it like a customer would.
-export async function openWidget(baseUrl) {
-  const dom = await JSDOM.fromURL(`${baseUrl}/`, {
+export async function openWidget(baseUrl, path = '/') {
+  const dom = await JSDOM.fromURL(`${baseUrl}${path}`, {
     runScripts: 'dangerously',
     resources: 'usable',
     pretendToBeVisual: true,

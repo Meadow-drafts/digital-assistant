@@ -132,10 +132,11 @@ test('the chip becomes prominent on a cue, stays so through a calm turn, and fol
   assert.equal(w.q('human-chip').dataset.prominent, 'true', 'once prominent in a conversation it stays prominent');
 });
 
-test('clicking the chip only emits the handoff-request event with the conversation id, and calls no service', async (t) => {
+test('clicking the chip announces the request with the conversation id and then asks the service for a case, once', async (t) => {
   const svc = await startService({ model: createFakeModel(['Sorry.']) });
   t.after(svc.close);
   const w = await openWidget(svc.baseUrl);
+  t.after(() => w.dom.window.close());
   const heard = [];
   w.document.addEventListener('bank-assistant:handoff-request', (e) => heard.push(e.detail));
 
@@ -143,24 +144,30 @@ test('clicking the chip only emits the handoff-request event with the conversati
   await w.until(() => w.q('human-chip').dataset.prominent === 'true');
   const fetched = [];
   const realFetch = w.dom.window.fetch;
-  w.dom.window.fetch = (...args) => { fetched.push(args); return realFetch(...args); };
+  w.dom.window.fetch = (url, init) => { fetched.push(String(url)); return realFetch(url, init); };
   assert.deepEqual(heard, [], 'no event before a click');
+  assert.deepEqual(svc.mailer.outbox, [], 'no case and no page before a click');
 
   w.q('human-chip').click();
+  await w.until(() => w.q('case-banner') && !w.q('case-banner').hidden);
+  w.q('human-chip').click(); // disabled while a case is open: no second case
 
   assert.equal(heard.length, 1);
   assert.match(heard[0].conversationId, /^[0-9a-f-]{36}$/);
-  assert.deepEqual(fetched, []);
+  assert.equal(fetched.filter((u) => u.endsWith('/handoff')).length, 1);
+  assert.equal(svc.mailer.outbox.length, 1);
 });
 
 test('the chip works before any message and reports no conversation yet', async (t) => {
   const svc = await startService();
   t.after(svc.close);
   const w = await openWidget(svc.baseUrl);
+  t.after(() => w.dom.window.close());
   const heard = [];
   w.document.addEventListener('bank-assistant:handoff-request', (e) => heard.push(e.detail));
 
   w.q('human-chip').click();
+  await w.until(() => w.q('case-banner') && !w.q('case-banner').hidden);
 
   assert.equal(heard.length, 1);
   assert.equal(heard[0].conversationId, null);

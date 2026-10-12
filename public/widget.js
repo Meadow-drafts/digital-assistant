@@ -8,6 +8,9 @@
 // bank-assistant:prefill {form, fields} when a pre-fill card has a page to fill. A host that cancels the second one
 // owns the fill (the production hook); otherwise the widget fills matching inputs of the page itself.
 // fill-timeout (attribute, ms, default 3000): how long to wait for the form to appear after navigating.
+// Handoff: only a click on the human chip asks the service for a case (the host also hears
+// bank-assistant:handoff-request). The widget then shows the case banner and polls the service every poll-ms
+// (attribute, default 2000) for the case state and the agent's messages.
 const TEXT = {
   en: {
     title: 'Assistant',
@@ -30,6 +33,20 @@ const TEXT = {
     filled: 'Filled by the assistant. Check it before you continue.',
     copyTitle: 'These fields could not be filled. Copy the values:',
     copy: 'Copy',
+    caseWaiting: 'Waiting for an agent',
+    caseWithAgent: 'With an agent',
+    caseRef: (ref) => `Case ${ref}`,
+    cancel: 'Cancel',
+    humanBadge: 'human agent',
+    automated: 'Automated reply',
+    agentJoined: (name) => `${name} (human agent) joined. The assistant is now muted.`,
+    cancelled: (ref) => `Case ${ref} closed: cancelled by you. Back to the assistant.`,
+    resolved: (ref) => `Case ${ref} resolved.`,
+    solvedQ: 'Was this solved?',
+    yes: 'Yes',
+    no: 'No',
+    thanks: 'Thank you for your feedback.',
+    handoffError: 'We could not reach support right now. Please try again.',
   },
   fr: {
     title: 'Assistant',
@@ -52,6 +69,20 @@ const TEXT = {
     filled: 'Rempli par l’assistant. Vérifiez avant de continuer.',
     copyTitle: 'Ces champs n’ont pas pu être remplis. Copiez les valeurs :',
     copy: 'Copier',
+    caseWaiting: "En attente d'un agent",
+    caseWithAgent: 'Avec un agent',
+    caseRef: (ref) => `Dossier ${ref}`,
+    cancel: 'Annuler',
+    humanBadge: 'agent humain',
+    automated: 'Réponse automatique',
+    agentJoined: (name) => `${name} (agent humain) a rejoint la conversation. L'assistant est maintenant en sourdine.`,
+    cancelled: (ref) => `Dossier ${ref} fermé : annulé par vous. Retour à l'assistant.`,
+    resolved: (ref) => `Dossier ${ref} résolu.`,
+    solvedQ: 'Cela a-t-il résolu votre problème ?',
+    yes: 'Oui',
+    no: 'Non',
+    thanks: 'Merci pour votre retour.',
+    handoffError: "Nous n'avons pas pu joindre le support pour le moment. Veuillez réessayer.",
   },
 };
 
@@ -67,12 +98,27 @@ class BankAssistant extends HTMLElement {
   connectedCallback() {
     this.lang = this.getAttribute('lang') === 'fr' ? 'fr' : 'en';
     this.conversationId = null;
+    this.caseView = null;
+    this.cursor = 0;
     this.cards = new WeakMap();
     this.innerHTML = `
       <section class="ba-root" aria-label="Assistant">
         <header data-role="title"></header>
+        <div data-role="case-banner" hidden>
+          <strong data-role="case-state"></strong>
+          <span data-role="case-ref"></span>
+          <span data-role="case-elapsed"></span>
+          <span data-role="case-agent" hidden><span data-role="case-agent-name"></span> <span data-role="human-badge"></span></span>
+          <p data-role="case-notice"></p>
+          <span data-role="case-actions"></span>
+        </div>
         <div data-role="messages" aria-live="polite"></div>
         <div data-role="thinking" hidden></div>
+        <div data-role="solved-prompt" hidden>
+          <span data-role="solved-text"></span>
+          <button data-role="solved-yes" type="button"></button>
+          <button data-role="solved-no" type="button"></button>
+        </div>
         <form data-role="pin-box" hidden>
           <p data-role="pin-title"></p>
           <input data-role="pin-input" type="password" inputmode="numeric" autocomplete="off" maxlength="12" />
@@ -88,11 +134,14 @@ class BankAssistant extends HTMLElement {
       </section>`;
     this.q = (r) => this.querySelector(`[data-role="${r}"]`);
     this.q('form').addEventListener('submit', (e) => { e.preventDefault(); this.submit(); });
-    // The chip only announces the customer's request; the host page starts any handoff.
     this.q('pin-box').addEventListener('submit', (e) => { e.preventDefault(); this.submitPin(); });
+    // Only this click opens a handoff: the host hears about it, then the service is asked for a case.
     this.q('human-chip').addEventListener('click', () => {
       this.dispatchEvent(new CustomEvent('bank-assistant:handoff-request', { bubbles: true, detail: { conversationId: this.conversationId } }));
+      this.startHandoff();
     });
+    this.q('solved-yes').addEventListener('click', () => this.answerSolved(true));
+    this.q('solved-no').addEventListener('click', () => this.answerSolved(false));
     this.render();
     this.resumeFill();
   }
@@ -109,6 +158,124 @@ class BankAssistant extends HTMLElement {
     this.q('thinking').textContent = t.thinking;
     this.q('disclaimer').textContent = t.disclaimer;
     this.q('disclaimer').hidden = false;
+    this.q('solved-text').textContent = t.solvedQ;
+    this.q('solved-yes').textContent = t.yes;
+    this.q('solved-no').textContent = t.no;
+    this.renderCase();
+  }
+
+  // ---- handoff: the four states the customer sees (bot, waiting for agent, with agent, resolved) ----
+
+  // The banner for an open case. Everything comes from the service's case view, set as text.
+  renderCase() {
+    const t = TEXT[this.lang];
+    const view = this.caseView;
+    const open = view && (view.state === 'waiting' || view.state === 'with_agent');
+    this.q('case-banner').hidden = !open;
+    this.q('human-chip').disabled = Boolean(open);
+    if (!open) return;
+    const withAgent = view.state === 'with_agent';
+    this.q('case-state').textContent = withAgent ? t.caseWithAgent : t.caseWaiting;
+    this.q('case-ref').textContent = t.caseRef(view.ref);
+    const seconds = Number.isFinite(view.elapsedSeconds) ? view.elapsedSeconds : 0;
+    this.q('case-elapsed').hidden = withAgent;
+    this.q('case-elapsed').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    this.q('case-agent').hidden = !withAgent;
+    this.q('case-agent-name').textContent = withAgent ? String(view.agent?.firstName ?? '') : '';
+    this.q('human-badge').textContent = t.humanBadge;
+    this.q('case-notice').textContent = typeof view.notice === 'string' ? view.notice : '';
+    // Cancel exists only while nobody has taken the case.
+    const actions = this.q('case-actions');
+    if (withAgent) actions.replaceChildren();
+    else if (!actions.firstChild) {
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.dataset.role = 'case-cancel';
+      cancel.textContent = t.cancel;
+      cancel.addEventListener('click', () => this.cancelHandoff());
+      actions.append(cancel);
+    }
+    const cancel = actions.firstChild;
+    if (cancel) cancel.textContent = t.cancel;
+  }
+
+  addNote(text) {
+    const el = document.createElement('div');
+    el.dataset.role = 'case-note';
+    el.textContent = text;
+    this.q('messages').appendChild(el);
+  }
+
+  token() { return this.getToken?.() ?? this.getAttribute('token') ?? ''; }
+
+  async caseCall(method, path, body) {
+    const res = await fetch(`${this.getAttribute('api') ?? ''}${path}`, {
+      method,
+      headers: { ...(body ? { 'content-type': 'application/json' } : {}), authorization: `Bearer ${this.token()}` },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return { ok: res.ok, status: res.status, body: await res.json().catch(() => ({})) };
+  }
+
+  async startHandoff() {
+    if (this.handoffBusy || this.caseView?.state === 'waiting' || this.caseView?.state === 'with_agent') return;
+    this.handoffBusy = true;
+    try {
+      const res = await this.caseCall('POST', '/handoff', { conversationId: this.conversationId, tenant: this.getAttribute('tenant') });
+      if (!res.ok) { this.addNote(TEXT[this.lang].handoffError); return; }
+      this.conversationId = res.body.conversationId;
+      this.cursor = 0;
+      this.applyCase(res.body);
+    } catch { this.addNote(TEXT[this.lang].handoffError); } finally { this.handoffBusy = false; }
+  }
+
+  async cancelHandoff() {
+    const ref = this.caseView?.ref;
+    try {
+      const res = await this.caseCall('POST', '/case/cancel', { conversationId: this.conversationId });
+      if (res.ok) {
+        this.applyCase({ state: 'bot', ref: null });
+        this.addNote(TEXT[this.lang].cancelled(ref));
+      } else await this.poll(); // someone claimed it first: show the truth
+    } catch { /* the next poll shows where the case stands */ }
+  }
+
+  async answerSolved(solved) {
+    try { await this.caseCall('POST', '/case/feedback', { conversationId: this.conversationId, solved }); } catch { /* the prompt goes either way */ }
+    this.q('solved-prompt').hidden = true;
+    this.addNote(TEXT[this.lang].thanks);
+  }
+
+  // Takes a case view from the service: the banner, the agent's new messages, and what to poll next.
+  applyCase(view) {
+    const before = this.caseView?.state ?? 'bot';
+    this.caseView = view;
+    for (const m of view.messages ?? []) this.addMessage('agent', m.text);
+    if (Number.isInteger(view.next)) this.cursor = view.next;
+    if (view.state === 'with_agent' && before !== 'with_agent') this.addNote(TEXT[this.lang].agentJoined(view.agent?.firstName ?? ''));
+    if (view.state === 'resolved' && before !== 'resolved') {
+      this.addNote(TEXT[this.lang].resolved(view.ref));
+      this.q('solved-prompt').hidden = view.askSolved !== true;
+    }
+    this.renderCase();
+    this.schedulePoll();
+  }
+
+  schedulePoll() {
+    clearTimeout(this.pollTimer);
+    const state = this.caseView?.state;
+    if (state !== 'waiting' && state !== 'with_agent') return;
+    const wait = Number(this.getAttribute('poll-ms') ?? 2000);
+    this.pollTimer = setTimeout(() => this.poll(), Number.isFinite(wait) ? wait : 2000);
+  }
+
+  async poll() {
+    if (!this.isConnected) return;
+    try {
+      const res = await this.caseCall('GET', `/case?conversationId=${encodeURIComponent(this.conversationId)}&after=${this.cursor}`);
+      if (res.ok) { this.applyCase(res.body); return; }
+    } catch { /* try again below */ }
+    this.schedulePoll();
   }
 
   addMessage(from, text = '') {
@@ -119,6 +286,13 @@ class BankAssistant extends HTMLElement {
     this.q('messages').appendChild(el);
     el.scrollIntoView?.({ block: 'end' });
     return el;
+  }
+
+  addAutomatedLabel() {
+    const el = document.createElement('div');
+    el.dataset.role = 'automated-label';
+    el.textContent = TEXT[this.lang].automated;
+    this.q('messages').appendChild(el);
   }
 
   // Fixed next-step card from the service (human chip or a form shortcut); the text is never model-written.
@@ -408,6 +582,7 @@ class BankAssistant extends HTMLElement {
     this.q('thinking').hidden = false;
     let bubble = null;
     let guides = [];
+    let automated = false;
     try {
       const token = this.getToken?.() ?? this.getAttribute('token') ?? '';
       await this.startSession(token);
@@ -418,7 +593,10 @@ class BankAssistant extends HTMLElement {
       });
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
       for await (const ev of readEvents(res.body)) {
-        if (ev.type === 'delta') {
+        if (ev.type === 'case') {
+          automated = ev.automated === true; // the bot answering while a case waits for an agent
+        } else if (ev.type === 'delta') {
+          if (!bubble && automated) this.addAutomatedLabel();
           bubble ??= this.addMessage('assistant');
           bubble.textContent += ev.text;
         } else if (ev.type === 'action_card') {
