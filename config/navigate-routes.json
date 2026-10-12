@@ -1,5 +1,5 @@
 {
-  "_note": "Pages the assistant may offer as 'Open and review' cards. Paths and names are copied from the portal's route config (src/routes/app.routes.js in bpay-bicec); update them here when the portal changes. 'labels' are the portal's own page names. 'natures' are the package nature codes of the route (a customer needs any one of them when packages are used). 'primaryOnly' pages are never offered to a secondary connect. 'audience' lists who may see the page. Approvals, PIN and password change and any path with a record id are refused at load, whatever this file says.",
+  "_note": "Pages the assistant may offer as 'Open and review' cards. Paths and names are copied from the portal's route config (src/routes/app.routes.js in bpay-bicec); update them here when the portal changes. 'labels' are the portal's own page names. 'natures' are the package nature codes of the route (a customer needs any one of them when packages are used). 'primaryOnly' pages are never offered to a secondary connect. 'audience' lists who may see the page. Approvals, PIN and password change and any path with a record id are refused at load, whatever this file says. A route with 'prefillOnly' is never offered as a plain navigate card: only a pre-fill card (config/prefill.json) may open it.",
   "button": { "en": "Open and review", "fr": "Ouvrir et vérifier" },
   "routes": {
     "overview": {
@@ -39,6 +39,13 @@
       "labels": { "en": "Voucher", "fr": "Vouchers" },
       "audience": ["individual"],
       "natures": ["CAOUT"]
+    },
+    "airtime": {
+      "path": "/payments/value-added-services",
+      "labels": { "en": "Airtime", "fr": "Crédit téléphonique" },
+      "audience": ["individual"],
+      "natures": ["LOAR", "CEAR", "LOIB", "CEIB"],
+      "prefillOnly": true
     },
     "request_to_pay": {
       "path": "/request-to-pay",

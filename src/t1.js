@@ -337,5 +337,15 @@ export function createT1({ gateway, clock, etab = ETAB }) {
     return { error: 'unavailable' };
   }
 
-  return { run, start, unlockWithPortalFlag, unlockWithPin };
+  // The customer's own history rows for the pre-fill checks (known beneficiary, usual amount, a chosen past
+  // recipient). The raw rows stay inside the service: never given to the model, the UI or the audit. Null when
+  // they cannot be read (no session, package without history, gateway trouble), which the checks treat as unknown.
+  async function ownHistory(conversation, token, entitlements) {
+    const { session } = conversation;
+    if (!session) return null;
+    if (entitlements?.packages && !entitlements.packages.includes('HIST')) return null;
+    try { return await ownRows(session, { tenant: session.tenant, token }); } catch { return null; }
+  }
+
+  return { run, start, ownHistory, unlockWithPortalFlag, unlockWithPin };
 }

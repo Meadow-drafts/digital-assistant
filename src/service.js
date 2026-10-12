@@ -10,6 +10,7 @@ import { chipState, cuesIn, parseEscalate, questionKey } from './chip.js';
 import { PROTECTED_TEXTS, modelHistory, UNSUPPORTED_ID, answerMessages, dataMessages, explainMessages, routerMessages } from './prompts.js';
 import { intentTool } from './intents.js';
 import { offeredPages, parseNavigate, stepsOf, validateProposal } from './navigate.js';
+import { offeredForms, parsePrefill, validatePrefill } from './prefill.js';
 import { GUIDE_ID, NEXT_STEP, OUTCOMES, TEXT as EXPLAIN_TEXT, parseNext } from './explain.js';
 import { MESSAGES as T1_MESSAGES, TOOL_RULES, UNLOCK_MS, createT1, parseToolCall } from './t1.js';
 import { ownerOf, subjectOf, tokenOf } from './identity.js';
@@ -94,7 +95,7 @@ async function routeGuides({ model, language, available, guides, history, tools 
   return { picks: [...new Set(picks)].filter((id) => allowed.has(id)).slice(0, MAX_GUIDES), refusal: null };
 }
 
-export function createService({ devPage, model, gateway, clock, audit, guides, navigation, scamCues, entitlements, failedQuestions, outputAllowlist, limits }) {
+export function createService({ devPage, model, gateway, clock, audit, guides, navigation, prefill, scamCues, entitlements, failedQuestions, outputAllowlist, limits }) {
   const t1 = gateway ? createT1({ gateway, clock }) : null;
   const limiter = createLimiter({ clock, limits });
   const checkOutput = createOutputFilter({ allowlist: outputAllowlist, protectedTexts: PROTECTED_TEXTS });
@@ -266,6 +267,7 @@ export function createService({ devPage, model, gateway, clock, audit, guides, n
     let toolAudit = null;
     let nextTag = null;
     let navigateAudit = null;
+    let prefillAudit = null;
     // The model's text is held back until it has been read in full: the refusal
     // tag comes off the front before anything reaches the customer.
     const answer = async (messages, { known, navigate } = {}) => {
@@ -275,13 +277,30 @@ export function createService({ devPage, model, gateway, clock, audit, guides, n
       const escalated = parseEscalate(refused.text);
       const nexted = parseNext(escalated.text);
       nextTag = nexted.next;
-      const navigated = parseNavigate(nexted.text);
+      const prefilled = parsePrefill(nexted.text);
+      const navigated = parseNavigate(prefilled.text);
       const parsed = { category: refused.category, text: navigated.text };
       // A proposal is checked before anything is shown. If it is dropped, the model's words (which may point at the
       // card or a page) are replaced by the steps of the guide it answered from.
       let card = null;
       let checkedProposal = null;
-      if (navigate && navigated.proposal !== null && !refused.category) {
+      let checkedPrefill = null;
+      if (navigate && prefilled.proposal !== null && !refused.category) {
+        // The tag is always taken off the text; a form is only offered when the registry accepts every value.
+        const checked = prefill
+          ? await validatePrefill({
+            registry: prefill, navigation, proposal: prefilled.proposal, language, entitlements: navigate.entitlements,
+            session: navigate.prefill?.conversation.session, message, history: navigate.prefill?.history ?? (async () => null),
+          })
+          : { ok: false, reason: 'not_available', form: null };
+        if (checked.ok) {
+          card = checked.card;
+          checkedPrefill = checked.audit;
+        } else {
+          checkedPrefill = { outcome: 'dropped', reason: checked.reason, form: checked.form };
+          parsed.text = navigate.fallback || NO_VERIFIED_STEPS[language];
+        }
+      } else if (navigate && navigated.proposal !== null && !refused.category) {
         const checked = validateProposal(navigation, navigated.proposal, language, navigate.entitlements);
         const plain = /^[a-z_]{1,32}$/.test(navigated.proposal) ? navigated.proposal : null;
         if (checked.ok) {
@@ -304,6 +323,7 @@ export function createService({ devPage, model, gateway, clock, audit, guides, n
       }
       refusal = parsed.category ?? refusal;
       navigateAudit = checkedProposal;
+      prefillAudit = checkedPrefill;
       reply += parsed.text;
       send(res, 'delta', { text: parsed.text });
       if (card && !refusal) send(res, 'action_card', card);
@@ -379,7 +399,13 @@ export function createService({ devPage, model, gateway, clock, audit, guides, n
             await failedQuestions?.append({ time: new Date(clock.now()).toISOString(), conversationId, tenant: body.tenant ?? null, language, question: message });
           } else {
             const material = picks.map((id) => guides.get(id)?.[language] ?? null).filter(Boolean);
-            await answer(answerMessages(material, picks.includes(UNSUPPORTED_ID) ? guides.unsupported : '', history, navigation ? offeredPages(navigation, language, ent) : []), { navigate: navigation ? { fallback: stepsOf(material[0]?.text ?? ''), entitlements: ent } : null });
+            // The customer's own history is read at most once per turn, and only if a pre-fill check needs it.
+            let ownRows;
+            const prefillHistory = () => (ownRows ??= t1 ? t1.ownHistory(conversation, tokenOf(req), ent) : Promise.resolve(null));
+            const forms = navigation && prefill ? offeredForms(prefill, navigation, language, ent) : [];
+            await answer(answerMessages(material, picks.includes(UNSUPPORTED_ID) ? guides.unsupported : '', history, navigation ? offeredPages(navigation, language, ent) : [], forms), {
+              navigate: navigation ? { fallback: stepsOf(material[0]?.text ?? ''), entitlements: ent, prefill: { conversation, history: prefillHistory } } : null,
+            });
             const closing = used.find((g) => g[language].closing)?.[language].closing;
             if (!refusal && !filtered) {
               const text = closing ? `\n\n${closing.heading}${language === 'fr' ? ' :' : ':'} ${closing.body}` : `\n\n${GENERIC_CLOSING[language]}`;
@@ -425,6 +451,7 @@ export function createService({ devPage, model, gateway, clock, audit, guides, n
       ...(refusal ? { refusalCategory: refusal } : {}),
       ...(scam.length ? { scamCues: scam } : {}),
       ...(navigateAudit ? { navigate: navigateAudit } : {}),
+      ...(prefillAudit ? { prefill: prefillAudit } : {}),
       ...(toolAudit ? { tool: toolAudit.name, toolOutcome: toolAudit.outcome, toolSource: toolAudit.source, ...(toolAudit.reason ? { toolReason: toolAudit.reason } : {}), ...(toolAudit.data ? { toolData: toolAudit.data } : {}) } : {}),
     });
     res.end();

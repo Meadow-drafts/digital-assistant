@@ -31,14 +31,21 @@ const EXPLAIN_RULES = 'Explain in plain language why the transfer below failed, 
 const NAVIGATE_RULES = 'If opening one portal page would help the customer, you may add exactly one tag [[navigate:ID]] using an id from the list below, ' +
   'and only if the page is what the steps point to. Never write a link, a path or a button label yourself.';
 
-export const PROTECTED_TEXTS = [ROUTER_RULES, ANSWER_RULES, EXPLAIN_RULES, NAVIGATE_RULES];
+// The forms the service may pre-fill. The model names a form id and the values the customer gave; the service checks
+// every value against what the customer said and their own history, and draws the card itself.
+const PREFILL_RULES = 'If the customer asks you to send money, top up airtime, pay a bill or request a payment and gives the values, ' +
+  'you may add exactly one tag [[prefill:FORM_ID {"field":value}]] using a form id from the list below and ONLY the fields listed for it. ' +
+  'Use only values the customer wrote in their latest message, exactly as written; leave out any field they did not give and never guess one. ' +
+  'Never include a PIN, OTP, password or code. Do not say you filled, sent or confirmed anything: tell the customer to open the form, review it and submit it themselves.';
+
+export const PROTECTED_TEXTS = [ROUTER_RULES, ANSWER_RULES, EXPLAIN_RULES, NAVIGATE_RULES, PREFILL_RULES];
 
 // Customer text is untrusted data. Each user turn goes to the model inside one
 // delimited block, and anything in it that could forge the block's end or a
 // refusal tag is defused first, so it can neither close the block nor steer
 // the service's own control tags.
 export function asData(text) {
-  const safe = text.replace(/<\/?\s*user_data\s*>/gi, '[removed]').replace(/\[\[\s*(refusal|escalate|next|navigate)\s*:/gi, '[ [$1:');
+  const safe = text.replace(/<\/?\s*user_data\s*>/gi, '[removed]').replace(/\[\[\s*(refusal|escalate|next|navigate|prefill)\s*:/gi, '[ [$1:');
   return `<user_data>\n${safe}\n</user_data>`;
 }
 
@@ -49,11 +56,12 @@ export function routerMessages(index, history, { tools = '' } = {}) {
   return [{ role: 'system', content: system }, ...modelHistory(history.slice(-4))];
 }
 
-export function answerMessages(guides, unsupported, history, pages = []) {
+export function answerMessages(guides, unsupported, history, pages = [], forms = []) {
   const parts = guides.map((g) => g.text);
   if (unsupported) parts.push(`# NOT AVAILABLE IN THE PORTAL\n${unsupported}`);
   const nav = pages.length ? `\n\n${NAVIGATE_RULES}\n# PAGES\n${pages.map((p) => `${p.id}: ${p.label}`).join('\n')}` : '';
-  return [{ role: 'system', content: `${ANSWER_RULES}${nav}\n\n# GUIDES\n${parts.join('\n\n---\n\n')}` }, ...modelHistory(history)];
+  const fill = forms.length ? `\n\n${PREFILL_RULES}\n# FORMS\n${forms.map((f) => `${f.id}: ${f.fields.join('; ')}`).join('\n')}` : '';
+  return [{ role: 'system', content: `${ANSWER_RULES}${nav}${fill}\n\n# GUIDES\n${parts.join('\n\n---\n\n')}` }, ...modelHistory(history)];
 }
 
 // Data read for the customer (already masked). Anything inside it, such as a

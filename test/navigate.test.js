@@ -146,7 +146,7 @@ const route = (path, over = {}) => ({ button: { en: 'Open and review', fr: 'Ouvr
 test('the shipped config lists exactly the eight allowlisted pages with the portal route paths', () => {
   const navigation = loadNavigation(NAVIGATION);
 
-  assert.deepEqual([...navigation.routes].map(([id, r]) => [id, r.path]), [
+  assert.deepEqual([...navigation.routes].filter(([, r]) => !r.prefillOnly).map(([id, r]) => [id, r.path]), [
     ['overview', '/overview'],
     ['history', '/history'],
     ['account_history', '/history/account'],
@@ -157,6 +157,7 @@ test('the shipped config lists exactly the eight allowlisted pages with the port
     ['request_to_pay', '/request-to-pay'],
   ]);
   assert.equal(navigation.routes.get('account_history').primaryOnly, true);
+  assert.deepEqual([...navigation.routes].filter(([, r]) => r.prefillOnly).map(([id]) => id), ['airtime'], 'the one extra page is only for pre-fill cards');
 });
 
 test('a config edit cannot add approvals, PIN or password change, a route with a record id, or a path that leaves the portal', () => {

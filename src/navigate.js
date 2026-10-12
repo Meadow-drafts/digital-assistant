@@ -48,7 +48,7 @@ function refusalFor(route, entitlements) {
 // The pages this customer may be offered, for the model's list. The same rules as validateProposal, so a page
 // that would be dropped is not suggested in the first place.
 export function offeredPages(navigation, language, entitlements) {
-  return [...navigation.routes].filter(([, route]) => !refusalFor(route, entitlements))
+  return [...navigation.routes].filter(([, route]) => !route.prefillOnly && !refusalFor(route, entitlements))
     .map(([id, route]) => ({ id, label: route.labels[language] ?? route.labels.en }));
 }
 
@@ -60,9 +60,10 @@ const cardOf = (navigation, id, route, language) => ({
   button: navigation.button[language] ?? navigation.button.en,
 });
 
-export function validateProposal(navigation, id, language, entitlements) {
+// A prefillOnly page (the airtime form) can be opened by a pre-fill card, never by a plain navigate card.
+export function validateProposal(navigation, id, language, entitlements, { forPrefill = false } = {}) {
   const route = navigation.routes.get(id);
-  if (!route) return { ok: false, reason: 'unknown_action' };
+  if (!route || (route.prefillOnly && !forPrefill)) return { ok: false, reason: 'unknown_action' };
   const reason = refusalFor(route, entitlements);
   return reason ? { ok: false, reason } : { ok: true, card: cardOf(navigation, id, route, language) };
 }
