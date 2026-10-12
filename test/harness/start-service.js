@@ -6,6 +6,7 @@ import { createFakeClock } from './fake-clock.js';
 import { createMemoryAudit } from './memory-audit.js';
 import { createMemorySink } from './memory-sink.js';
 import { AGENTS, CONSOLE_URL } from './cases.js';
+import { loadSupport } from '../../src/support.js';
 
 // Boots the real service on an ephemeral port with all collaborators faked.
 // Any fake can be overridden; later tickets add their own via `overrides`.
@@ -18,6 +19,8 @@ export async function startService(overrides = {}) {
     audit: createMemoryAudit(),
     failedQuestions: createMemorySink(),
     agents: AGENTS,
+    // Timers and opening hours are the real placeholder config; the roster is the test one above.
+    support: loadSupport(new URL('../../config/support.json', import.meta.url)),
     consoleUrl: CONSOLE_URL,
     ...overrides,
   };

@@ -159,3 +159,17 @@ test('the chip click still announces the request to the host page, and then asks
   assert.equal(heard[0].conversationId, null);
   assert.match(w.q('case-ref').textContent, /C-\d+/, 'a customer can ask for a person before saying anything');
 });
+
+test('after 15 minutes unclaimed the banner tells the customer the case is queued and they will be emailed', async (t) => {
+  const svc = await startService({ model: createFakeModel(['Hi there.']) });
+  t.after(svc.close);
+  const w = await askForAgent(svc, t);
+  assert.doesNotMatch(w.q('case-notice').textContent, /queued/i);
+
+  await svc.clock.advance(15 * 60_000);
+  await w.until(() => /queued/i.test(w.q('case-notice').textContent));
+
+  assert.match(w.q('case-notice').textContent, /email/i);
+  assert.match(w.q('case-notice').textContent, /within 24 hours/i, 'the honest expectation stays');
+  assert.ok(w.q('case-cancel'), 'the case is still open and can be cancelled');
+});

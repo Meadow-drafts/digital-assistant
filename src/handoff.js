@@ -1,5 +1,6 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createCaseStore } from './cases.js';
+import { createHours } from './hours.js';
 import { json, readJson } from './http.js';
 import { maskText } from './mask.js';
 import { ownerOf, tokenOf } from './identity.js';
@@ -9,10 +10,32 @@ export const NOTICE = {
   en: 'We will update you within 24 hours.',
   fr: 'Nous vous tiendrons informé dans les 24 heures.',
 };
+// Shown once a case is queued: after 15 minutes unclaimed, or at once outside opening hours.
+export const QUEUED = {
+  en: 'Your case is queued. You can leave this chat: we will email you.',
+  fr: "Votre dossier est mis en file d'attente. Vous pouvez quitter ce chat : nous vous écrirons par e-mail.",
+};
+export const QUEUED_AFTER_HOURS = {
+  en: 'Our support team is closed right now. Your case is queued and an agent will pick it up at the start of the next shift. We will email you.',
+  fr: "Notre équipe est fermée pour le moment. Votre dossier est mis en file d'attente et un agent le prendra au début de la prochaine période d'ouverture. Nous vous écrirons par e-mail.",
+};
+// Emails to the customer carry the case reference and a fixed sentence, never anything from the conversation.
+const CUSTOMER_MAIL = {
+  received: {
+    en: (ref) => ({ subject: `[${ref}] We received your request`, body: `We received your request (case ${ref}) outside our opening hours.\nAn agent will pick it up at the start of the next shift. We will update you within 24 hours.` }),
+    fr: (ref) => ({ subject: `[${ref}] Nous avons bien reçu votre demande`, body: `Nous avons reçu votre demande (dossier ${ref}) en dehors de nos horaires d'ouverture.\nUn agent la prendra au début de la prochaine période d'ouverture. Nous vous tiendrons informé dans les 24 heures.` }),
+  },
+  reply: {
+    en: (ref) => ({ subject: `[${ref}] You have a new message`, body: `An agent answered your case ${ref}. Open the chat on the portal to read it.` }),
+    fr: (ref) => ({ subject: `[${ref}] Vous avez un nouveau message`, body: `Un agent a répondu à votre dossier ${ref}. Ouvrez le chat sur le portail pour le lire.` }),
+  },
+};
 
 // Customer and agent routes for handoff cases. Returns true when it served the request.
-export function createHandoff({ clock, audit, mailer, agents, consoleUrl, conversations }) {
+export function createHandoff({ clock, audit, mailer, agents, support, consoleUrl, conversations }) {
   const store = createCaseStore({ clock });
+  const { timers } = support;
+  const hours = createHours(support.hours);
   const onCall = (agents?.onCall ?? []).map((id) => agents.list.find((a) => a.id === id)).filter(Boolean);
 
   // Demo agent login: the agents come from config, sessions live in memory for sessionMs.
@@ -31,6 +54,7 @@ export function createHandoff({ clock, audit, mailer, agents, consoleUrl, conver
     // After resolution the customer is asked once whether it was solved.
     ...(c.state === 'resolved' ? { askSolved: c.solved === null } : {}),
     ...(c.state === 'waiting' ? { elapsedSeconds: Math.floor((clock.now() - c.openedAt) / 1000) } : {}),
+    ...(c.state === 'waiting' && c.queued ? { queued: true, queuedNotice: (c.afterHours ? QUEUED_AFTER_HOURS : QUEUED)[c.language] } : {}),
   });
 
   const record = (c, outcome) => audit.append({
@@ -38,12 +62,65 @@ export function createHandoff({ clock, audit, mailer, agents, consoleUrl, conver
     userText: '', replyText: '', outcome, caseRef: c.ref,
   });
 
+  // Mail never throws into a request or a timer: a failed send is audited and the case carries on.
+  const send = async (c, message, outcome) => {
+    try { await mailer.send(message); } catch { await record(c, `${outcome}_failed`); return; }
+    await record(c, outcome);
+  };
+
   // The page: a link and the conversation id only. Never any message content.
-  const page = (c) => Promise.all(onCall.map((agent) => mailer.send({
+  const pageText = (c, agent) => ({
     to: agent.email,
     subject: `[${c.ref}] New chat case`,
     body: `A customer is waiting for an agent.\nCase: ${c.ref}\nConversation: ${c.conversationId}\nOpen: ${consoleUrl}?case=${c.ref}`,
-  })));
+  });
+  const page = (c, who, outcome) => Promise.all(who.map((agent) => send(c, pageText(c, agent), outcome)));
+
+  const stillWaiting = (c) => c.state === 'waiting';
+  // A timer that does nothing once the case has been claimed or cancelled.
+  const later = (c, ms, fn) => clock.setTimeout(async () => { if (stillWaiting(c)) await fn(); }, ms);
+
+  // On-call first; the whole pool after broadcastMs unclaimed; the customer told "queued" after queuedNoticeMs.
+  async function startPaging(c) {
+    await page(c, onCall, 'case_paged');
+    later(c, timers.broadcastMs, () => page(c, agents.list, 'case_broadcast'));
+    later(c, timers.queuedNoticeMs, async () => { c.queued = true; await record(c, 'case_queued'); });
+  }
+
+  // Outside opening hours: queued at once, the customer is emailed, the page waits for the next shift start.
+  async function queueUntilOpen(c, conversation) {
+    c.queued = true;
+    c.afterHours = true;
+    await record(c, 'case_queued_after_hours');
+    const email = conversation.session?.email;
+    if (email) await send(c, { to: email, ...CUSTOMER_MAIL.received[c.language](c.ref) }, 'customer_confirmation_emailed');
+    else await record(c, 'customer_email_missing');
+    const opensAt = hours.nextOpen(clock.now());
+    later(c, opensAt - clock.now(), async () => { c.afterHours = false; c.queued = false; await startPaging(c); });
+  }
+
+  // Presence: each side counts as "gone" after absentMs without touching the case. One email per absence.
+  const gone = (seenAt) => clock.now() - seenAt > timers.absentMs;
+  const customerSeen = (c) => { c.customerSeenAt = clock.now(); c.customerEmailed = false; };
+  const agentSeen = (c) => { c.agentSeenAt = clock.now(); c.agentEmailed = false; };
+
+  // An agent wrote and the customer has left: the words wait on the case, the customer gets a fixed-sentence email.
+  async function mailCustomerIfGone(c) {
+    if (c.customerEmailed || !gone(c.customerSeenAt)) return;
+    c.customerEmailed = true;
+    if (!c.customerEmail) { await record(c, 'customer_email_missing'); return; }
+    await send(c, { to: c.customerEmail, ...CUSTOMER_MAIL.reply[c.language](c.ref) }, 'customer_emailed');
+  }
+  // The customer wrote and the agent who has the case has left: link and conversation id only.
+  async function mailAgentIfGone(c) {
+    if (c.agentEmailed || !gone(c.agentSeenAt)) return;
+    c.agentEmailed = true;
+    await send(c, {
+      to: c.agent.email,
+      subject: `[${c.ref}] The customer wrote`,
+      body: `A customer has a new message waiting.\nCase: ${c.ref}\nConversation: ${c.conversationId}\nOpen: ${consoleUrl}?case=${c.ref}`,
+    }, 'agent_emailed');
+  }
 
   async function openHandoff(req, res) {
     let body;
@@ -61,8 +138,11 @@ export function createHandoff({ clock, audit, mailer, agents, consoleUrl, conver
     // The agent starts with the conversation so far, not a blank page.
     for (const m of conversation.history) add(c, m.role === 'user' ? 'customer' : 'bot', m.content);
     add(c, 'system', 'Case opened by the customer.');
+    c.customerEmail = conversation.session?.email ?? null;
+    customerSeen(c);
     await record(c, 'handoff_opened');
-    await page(c);
+    if (hours.isOpen(clock.now())) await startPaging(c);
+    else await queueUntilOpen(c, conversation);
     json(res, 200, { conversationId, ...view(c) });
   }
 
@@ -80,6 +160,7 @@ export function createHandoff({ clock, audit, mailer, agents, consoleUrl, conver
     const c = store.latestFor(id);
     // A cancelled case is closed: the conversation is back with the bot.
     if (!c || c.closeReason === 'cancelled_by_user') { json(res, 200, { state: 'bot', ref: null }); return; }
+    customerSeen(c);
     const after = Number.parseInt(url.searchParams.get('after') ?? '0', 10) || 0;
     // The customer receives the agent's words; their own side is already on their screen.
     const messages = c.transcript.filter((m) => m.from === 'agent' && m.seq > after).map(({ seq, from, text }) => ({ seq, from, text }));
@@ -132,9 +213,10 @@ export function createHandoff({ clock, audit, mailer, agents, consoleUrl, conver
 
   const MAX_TEXT = 1000;
 
-  function caseDetail(res, ref) {
+  function caseDetail(res, ref, agent) {
     const c = store.get(ref);
     if (!c) { json(res, 404, { error: 'not_found' }); return; }
+    if (c.agent?.id === agent.id) agentSeen(c);
     json(res, 200, { ...row(c), conversationId: c.conversationId, transcript: c.transcript.map(({ seq, from, text, at }) => ({ seq, from, text, at })) });
   }
 
@@ -154,7 +236,9 @@ export function createHandoff({ clock, audit, mailer, agents, consoleUrl, conver
     if (!c) return;
     const text = typeof body?.text === 'string' ? body.text.trim() : '';
     if (!text || text.length > MAX_TEXT) { json(res, 400, { error: 'bad_text' }); return; }
+    agentSeen(c);
     add(c, 'agent', text);
+    await mailCustomerIfGone(c);
     json(res, 200, { ok: true });
   }
 
@@ -184,6 +268,8 @@ export function createHandoff({ clock, audit, mailer, agents, consoleUrl, conver
   async function claimCase(res, agent, ref) {
     const claimed = store.claim(ref, agent);
     if (!claimed.ok) { json(res, claimed.reason === 'not_found' ? 404 : 409, { error: claimed.reason }); return; }
+    customerSeen(claimed.case); // the customer was in the queue a moment ago; the clock for "gone" starts from the claim
+    agentSeen(claimed.case);
     await record(claimed.case, 'case_claimed');
     json(res, 200, { ref, state: 'with_agent', claimedBy: agent.name });
   }
@@ -203,7 +289,7 @@ export function createHandoff({ clock, audit, mailer, agents, consoleUrl, conver
       if (req.method === 'POST' && target[2] === 'claim') await claimCase(res, agent, target[1]);
       else if (req.method === 'POST' && target[2] === 'messages') await agentMessage(req, res, agent, target[1]);
       else if (req.method === 'POST' && target[2] === 'resolve') await resolveCase(res, agent, target[1]);
-      else if (req.method === 'GET' && !target[2]) caseDetail(res, target[1]);
+      else if (req.method === 'GET' && !target[2]) caseDetail(res, target[1], agent);
       else json(res, 404, { error: 'not_found' });
       return true;
     }
@@ -216,7 +302,11 @@ export function createHandoff({ clock, audit, mailer, agents, consoleUrl, conver
     return c?.state === 'with_agent' ? c : null;
   };
   // A customer message for the agent. The text has already been through the secret shield.
-  handle.relayToAgent = (c, text) => add(c, 'customer', text);
+  handle.relayToAgent = async (c, text) => {
+    add(c, 'customer', text);
+    await mailAgentIfGone(c);
+    customerSeen(c);
+  };
   // A waiting case: the bot keeps answering, and both sides of the turn are kept on the case.
   handle.waitingCaseFor = (conversationId) => {
     const c = store.latestFor(conversationId);

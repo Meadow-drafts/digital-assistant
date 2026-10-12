@@ -183,7 +183,8 @@ class BankAssistant extends HTMLElement {
     this.q('case-agent').hidden = !withAgent;
     this.q('case-agent-name').textContent = withAgent ? String(view.agent?.firstName ?? '') : '';
     this.q('human-badge').textContent = t.humanBadge;
-    this.q('case-notice').textContent = typeof view.notice === 'string' ? view.notice : '';
+    // The queued sentence (after 15 minutes, or outside opening hours) comes before the 24-hour expectation.
+    this.q('case-notice').textContent = [view.queuedNotice, view.notice].filter((x) => typeof x === 'string').join(' ');
     // Cancel exists only while nobody has taken the case.
     const actions = this.q('case-actions');
     if (withAgent) actions.replaceChildren();

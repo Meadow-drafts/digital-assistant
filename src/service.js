@@ -81,12 +81,12 @@ async function routeGuides({ model, language, available, guides, history, tools 
   return { picks: [...new Set(picks)].filter((id) => allowed.has(id)).slice(0, MAX_GUIDES), refusal: null };
 }
 
-export function createService({ devPage, model, gateway, clock, audit, guides, navigation, prefill, scamCues, entitlements, failedQuestions, outputAllowlist, limits, mailer, agents, consoleUrl }) {
+export function createService({ devPage, model, gateway, clock, audit, guides, navigation, prefill, scamCues, entitlements, failedQuestions, outputAllowlist, limits, mailer, agents, support, consoleUrl }) {
   const t1 = gateway ? createT1({ gateway, clock }) : null;
   const limiter = createLimiter({ clock, limits });
   const checkOutput = createOutputFilter({ allowlist: outputAllowlist, protectedTexts: PROTECTED_TEXTS });
   const conversations = new Map();
-  const handoff = createHandoff({ clock, audit, mailer, agents, consoleUrl, conversations });
+  const handoff = createHandoff({ clock, audit, mailer, agents, support, consoleUrl, conversations });
 
   // Fail closed: if entitlements cannot be read, offer only guides that need
   // no package, no primary connect and fit the individual role.
@@ -226,7 +226,7 @@ export function createService({ devPage, model, gateway, clock, audit, guides, n
     const withAgent = known ? handoff.agentCaseFor(body.conversationId) : null;
     if (withAgent) {
       if (message.length > 1000) { res.writeHead(400).end(); return; }
-      handoff.relayToAgent(withAgent, message);
+      await handoff.relayToAgent(withAgent, message);
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
       if (shielded.flagged) send(res, 'warning', { code: 'secret_input', text: WARNING[language] });
       send(res, 'case', { state: 'with_agent', ref: withAgent.ref });

@@ -204,7 +204,9 @@ export function createT1({ gateway, clock, etab = ETAB }) {
     // ids only (age, accountNo, currency): the balance fields in each entry (accountBalance, availableBalance, soldeDispo,
     // historyBalance, indicativeBalance, sde, sin) and the names are dropped; balances wait for the PIN box (ticket 24)
     const accounts = info.accounts.map((a) => ({ age: a?.age, accountNo: a?.accountNo, dev: a?.dev }));
-    return Object.freeze({ cli, wallet: sub, etab, tenant, primaryConnect, accounts: Object.freeze(accounts) });
+    // The contact email is kept only to write to the customer about a support case; it never reaches the model.
+    const email = typeof info.email === 'string' && /^[^\s@,;<>]+@[^\s@,;<>]+$/.test(info.email) ? info.email : null;
+    return Object.freeze({ cli, wallet: sub, etab, tenant, primaryConnect, email, accounts: Object.freeze(accounts) });
   }
 
   // Never throws: { session } on success, otherwise { code, reason } for the caller to report.

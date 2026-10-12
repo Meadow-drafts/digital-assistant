@@ -1,0 +1,27 @@
+{
+  "_note": "Placeholder values from ticket 07 (research/07-sla.md). The bank replaces them with its real ones. Passwords here are demo-only.",
+  "agents": {
+    "list": [
+      { "id": "aline", "name": "Aline Mbarga", "email": "aline@example.test", "password": "change-me-aline" },
+      { "id": "paul", "name": "Paul Etoga", "email": "paul@example.test", "password": "change-me-paul" }
+    ],
+    "onCall": ["aline"],
+    "sessionMs": 28800000
+  },
+  "timers": {
+    "broadcastMs": 300000,
+    "queuedNoticeMs": 900000,
+    "absentMs": 120000
+  },
+  "hours": {
+    "utcOffsetMinutes": 60,
+    "days": [1, 2, 3, 4, 5],
+    "open": "08:00",
+    "close": "17:00"
+  },
+  "mail": {
+    "mode": "log",
+    "from": "assistant@example.test",
+    "smtp": { "host": "localhost", "port": 1025, "secure": false, "user": null, "password": null }
+  }
+}
