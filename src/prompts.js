@@ -26,14 +26,19 @@ const EXPLAIN_RULES = 'Explain in plain language why the transfer below failed, 
   'If the message is not in the guide, say you cannot tell the reason; never invent one. Do not write a closing next step; the service adds it. ' +
   'Start your reply with [[next:retry]] if the guide says the customer can fix it by changing something and trying again, otherwise with [[next:human]].';
 
-export const PROTECTED_TEXTS = [ROUTER_RULES, ANSWER_RULES, EXPLAIN_RULES];
+// The pages the service may turn into an "Open and review" card. The model only names an id from the list it is
+// given; the service checks it again and draws the card itself, so the model never writes a link, path or label.
+const NAVIGATE_RULES = 'If opening one portal page would help the customer, you may add exactly one tag [[navigate:ID]] using an id from the list below, ' +
+  'and only if the page is what the steps point to. Never write a link, a path or a button label yourself.';
+
+export const PROTECTED_TEXTS = [ROUTER_RULES, ANSWER_RULES, EXPLAIN_RULES, NAVIGATE_RULES];
 
 // Customer text is untrusted data. Each user turn goes to the model inside one
 // delimited block, and anything in it that could forge the block's end or a
 // refusal tag is defused first, so it can neither close the block nor steer
 // the service's own control tags.
 export function asData(text) {
-  const safe = text.replace(/<\/?\s*user_data\s*>/gi, '[removed]').replace(/\[\[\s*(refusal|escalate|next)\s*:/gi, '[ [$1:');
+  const safe = text.replace(/<\/?\s*user_data\s*>/gi, '[removed]').replace(/\[\[\s*(refusal|escalate|next|navigate)\s*:/gi, '[ [$1:');
   return `<user_data>\n${safe}\n</user_data>`;
 }
 
@@ -44,10 +49,11 @@ export function routerMessages(index, history, { tools = '' } = {}) {
   return [{ role: 'system', content: system }, ...modelHistory(history.slice(-4))];
 }
 
-export function answerMessages(guides, unsupported, history) {
+export function answerMessages(guides, unsupported, history, pages = []) {
   const parts = guides.map((g) => g.text);
   if (unsupported) parts.push(`# NOT AVAILABLE IN THE PORTAL\n${unsupported}`);
-  return [{ role: 'system', content: `${ANSWER_RULES}\n\n# GUIDES\n${parts.join('\n\n---\n\n')}` }, ...modelHistory(history)];
+  const nav = pages.length ? `\n\n${NAVIGATE_RULES}\n# PAGES\n${pages.map((p) => `${p.id}: ${p.label}`).join('\n')}` : '';
+  return [{ role: 'system', content: `${ANSWER_RULES}${nav}\n\n# GUIDES\n${parts.join('\n\n---\n\n')}` }, ...modelHistory(history)];
 }
 
 // Data read for the customer (already masked). Anything inside it, such as a

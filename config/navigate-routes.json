@@ -1,0 +1,49 @@
+{
+  "_note": "Pages the assistant may offer as 'Open and review' cards. Paths and names are copied from the portal's route config (src/routes/app.routes.js in bpay-bicec); update them here when the portal changes. 'labels' are the portal's own page names. 'natures' are the package nature codes of the route (a customer needs any one of them when packages are used). 'primaryOnly' pages are never offered to a secondary connect. 'audience' lists who may see the page. Approvals, PIN and password change and any path with a record id are refused at load, whatever this file says.",
+  "button": { "en": "Open and review", "fr": "Ouvrir et vérifier" },
+  "routes": {
+    "overview": {
+      "path": "/overview",
+      "labels": { "en": "Overview", "fr": "Vue d’ensemble" }
+    },
+    "history": {
+      "path": "/history",
+      "labels": { "en": "History", "fr": "Historique" }
+    },
+    "account_history": {
+      "path": "/history/account",
+      "labels": { "en": "Account History", "fr": "Historique Compte" },
+      "primaryOnly": true,
+      "natures": ["HIST"]
+    },
+    "transfer": {
+      "path": "/transfer",
+      "labels": { "en": "Transfer", "fr": "Transfert" },
+      "audience": ["individual"],
+      "natures": ["TRINC", "ACCT", "WTACC", "TRINW", "ACCTW", "TRIB", "OARE", "OWRE", "OCRE", "OVRE"]
+    },
+    "payments": {
+      "path": "/payments",
+      "labels": { "en": "Payments", "fr": "Paiements" },
+      "audience": ["individual"],
+      "natures": ["PALO", "PACE", "PACEI", "PAIM", "GPAY", "DDPA", "DDPC"]
+    },
+    "bill_payment": {
+      "path": "/payments/bill-payment",
+      "labels": { "en": "Bill payment", "fr": "Bill payment" },
+      "audience": ["individual"],
+      "natures": ["LOPV", "LOPE", "LOPA", "LOPS", "L0PC", "CEPV"]
+    },
+    "vouchers": {
+      "path": "/vouchers",
+      "labels": { "en": "Voucher", "fr": "Vouchers" },
+      "audience": ["individual"],
+      "natures": ["CAOUT"]
+    },
+    "request_to_pay": {
+      "path": "/request-to-pay",
+      "labels": { "en": "Request to Pay", "fr": "Demande de paiement" },
+      "natures": ["DDPA", "DDPC"]
+    }
+  }
+}

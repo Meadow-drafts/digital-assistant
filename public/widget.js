@@ -106,6 +106,29 @@ class BankAssistant extends HTMLElement {
     this.q('messages').appendChild(el);
   }
 
+  // "Open and review" card for a page the service validated. Everything shown comes from the service's card data
+  // (set as text, never markup); the click only asks the host to go to the page, it submits nothing. The host may
+  // handle bank-assistant:navigate with its router and call preventDefault; otherwise the browser goes to the path.
+  addActionCard(card) {
+    if (card?.kind !== 'navigate' || typeof card.path !== 'string' || !/^\/(?!\/)[A-Za-z0-9\-/]*$/.test(card.path)) return;
+    const el = document.createElement('div');
+    el.dataset.role = 'action-card';
+    el.dataset.kind = 'navigate';
+    el.dataset.target = String(card.target);
+    const label = document.createElement('span');
+    label.dataset.role = 'action-label';
+    label.textContent = String(card.label);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = String(card.button);
+    button.addEventListener('click', () => {
+      const go = new CustomEvent('bank-assistant:navigate', { bubbles: true, cancelable: true, detail: { path: card.path, target: card.target } });
+      if (this.dispatchEvent(go)) window.location.assign(card.path);
+    });
+    el.append(label, button);
+    this.q('messages').appendChild(el);
+  }
+
   addChip(text) {
     const el = document.createElement('div');
     el.dataset.role = 'guides-used';
@@ -220,6 +243,8 @@ class BankAssistant extends HTMLElement {
         if (ev.type === 'delta') {
           bubble ??= this.addMessage('assistant');
           bubble.textContent += ev.text;
+        } else if (ev.type === 'action_card') {
+          this.addActionCard(ev);
         } else if (ev.type === 'warning') {
           this.addMessage('assistant', ev.text).dataset.role = 'warning';
         } else if (ev.type === 'refusal' || ev.type === 'blocked') {
