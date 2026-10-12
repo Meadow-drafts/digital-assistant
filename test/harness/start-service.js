@@ -4,6 +4,7 @@ import { createFakeGateway } from './fake-gateway.js';
 import { createFakeMailer } from './fake-mailer.js';
 import { createFakeClock } from './fake-clock.js';
 import { createMemoryAudit } from './memory-audit.js';
+import { createMemorySink } from './memory-sink.js';
 
 // Boots the real service on an ephemeral port with all collaborators faked.
 // Any fake can be overridden; later tickets add their own via `overrides`.
@@ -14,6 +15,7 @@ export async function startService(overrides = {}) {
     mailer: createFakeMailer(),
     clock: createFakeClock(),
     audit: createMemoryAudit(),
+    failedQuestions: createMemorySink(),
     ...overrides,
   };
   const server = createService(deps);

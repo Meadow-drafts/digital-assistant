@@ -8,6 +8,7 @@ const TEXT = {
     placeholder: 'Ask how to do something…',
     send: 'Send',
     thinking: 'Thinking…',
+    used: 'What I used',
     error: 'The assistant is unavailable right now. Please try again.',
     disclaimer: 'Automated assistant, it may make mistakes. It will never ask for your PIN or OTP.',
   },
@@ -16,6 +17,7 @@ const TEXT = {
     placeholder: 'Demandez comment faire…',
     send: 'Envoyer',
     thinking: 'Réflexion en cours…',
+    used: "Ce que j'ai utilisé",
     error: "L'assistant est indisponible pour le moment. Veuillez réessayer.",
     disclaimer: 'Assistant automatique, il peut se tromper. Il ne vous demandera jamais votre PIN ni votre OTP.',
   },
@@ -61,6 +63,13 @@ class BankAssistant extends HTMLElement {
     return el;
   }
 
+  addChip(text) {
+    const el = document.createElement('div');
+    el.dataset.role = 'guides-used';
+    el.textContent = text;
+    this.q('messages').appendChild(el);
+  }
+
   async submit() {
     const input = this.q('input');
     const message = input.value.trim();
@@ -70,6 +79,7 @@ class BankAssistant extends HTMLElement {
     this.addMessage('user', message);
     this.q('thinking').hidden = false;
     let bubble = null;
+    let guides = [];
     try {
       const token = this.getToken?.() ?? this.getAttribute('token') ?? '';
       const res = await fetch(`${this.getAttribute('api') ?? ''}/chat`, {
@@ -82,9 +92,12 @@ class BankAssistant extends HTMLElement {
         if (ev.type === 'delta') {
           bubble ??= this.addMessage('assistant');
           bubble.textContent += ev.text;
+        } else if (ev.type === 'guides') {
+          guides = ev.guides;
         } else if (ev.type === 'done') {
           this.conversationId = ev.conversationId;
           if (TEXT[ev.language]) { this.lang = ev.language; this.render(); }
+          if (guides.length) this.addChip(`${TEXT[this.lang].used}${this.lang === 'fr' ? ' : ' : ': '}${guides.map((g) => g.title).join(', ')}`);
         } else if (ev.type === 'error') {
           throw new Error(ev.code);
         }

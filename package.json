@@ -6,7 +6,8 @@
   "description": "Standalone banking assistant service and chat widget",
   "scripts": {
     "start": "node src/index.js",
-    "test": "node --test \"test/**/*.test.js\""
+    "test": "node --test \"test/**/*.test.js\"",
+    "check:guides": "node scripts/check-guides.js"
   },
   "engines": {
     "node": ">=20"
