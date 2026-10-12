@@ -63,6 +63,15 @@ class BankAssistant extends HTMLElement {
     return el;
   }
 
+  // Fixed next-step card from the service (human chip or a form shortcut); the text is never model-written.
+  addCard(card) {
+    const el = document.createElement('div');
+    el.dataset.role = 'next-step';
+    el.dataset.kind = card.kind;
+    el.textContent = card.text;
+    this.q('messages').appendChild(el);
+  }
+
   addChip(text) {
     const el = document.createElement('div');
     el.dataset.role = 'guides-used';
@@ -94,6 +103,11 @@ class BankAssistant extends HTMLElement {
           bubble.textContent += ev.text;
         } else if (ev.type === 'warning') {
           this.addMessage('assistant', ev.text).dataset.role = 'warning';
+        } else if (ev.type === 'refusal' || ev.type === 'blocked') {
+          this.addCard(ev.card);
+        } else if (ev.type === 'busy') {
+          this.addMessage('assistant', ev.text).dataset.role = 'busy';
+          this.addCard(ev.card);
         } else if (ev.type === 'guides') {
           guides = ev.guides;
         } else if (ev.type === 'done') {

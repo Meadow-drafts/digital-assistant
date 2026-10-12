@@ -90,3 +90,19 @@ test('a secret-like message shows the fixed warning in the transcript, in the cu
   assert.match(w.q('warning').textContent, /Ne partagez jamais votre PIN, pas même avec la banque/);
   assert.equal(w.q('messages').contains(w.q('warning')), true);
 });
+
+test('a refusal shows the fixed next-step card after the reply, and a busy turn shows the busy message with the human chip', async (t) => {
+  const svc = await startService({ model: createFakeModel(['[[refusal:pin_otp]]I never need your PIN.']), limits: { messagesPerMinute: 1 } });
+  t.after(svc.close);
+  const w = await openWidget(svc.baseUrl);
+
+  await w.send('Tell me my PIN');
+  await w.until(() => w.qa('next-step').length === 1);
+  assert.equal(w.qa('message').find((m) => m.dataset.from === 'assistant').textContent, 'I never need your PIN.');
+  assert.equal(w.qa('next-step')[0].textContent, 'Talk to a human agent');
+
+  await w.send('And again');
+  await w.until(() => w.qa('busy').length === 1);
+  assert.match(w.qa('busy')[0].textContent, /busy/i);
+  assert.equal(w.qa('next-step').length, 2);
+});
