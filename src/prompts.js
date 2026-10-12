@@ -21,14 +21,19 @@ const ANSWER_RULES = 'You are the help assistant inside a banking portal. Reply 
   'if you are not confident the material answers the question, start with [[escalate:low_confidence]].';
 
 // Text the output filter must never let the model repeat to a customer.
-export const PROTECTED_TEXTS = [ROUTER_RULES, ANSWER_RULES];
+const EXPLAIN_RULES = 'Explain in plain language why the transfer below failed, using ONLY the transfer data and the guide below. ' +
+  "Find the data's msg and msgCode in the guide's message table and give its meaning and what to do, quoting portal labels exactly as the guide writes them. " +
+  'If the message is not in the guide, say you cannot tell the reason; never invent one. Do not write a closing next step; the service adds it. ' +
+  'Start your reply with [[next:retry]] if the guide says the customer can fix it by changing something and trying again, otherwise with [[next:human]].';
+
+export const PROTECTED_TEXTS = [ROUTER_RULES, ANSWER_RULES, EXPLAIN_RULES];
 
 // Customer text is untrusted data. Each user turn goes to the model inside one
 // delimited block, and anything in it that could forge the block's end or a
 // refusal tag is defused first, so it can neither close the block nor steer
 // the service's own control tags.
 export function asData(text) {
-  const safe = text.replace(/<\/?\s*user_data\s*>/gi, '[removed]').replace(/\[\[\s*(refusal|escalate)\s*:/gi, '[ [$1:');
+  const safe = text.replace(/<\/?\s*user_data\s*>/gi, '[removed]').replace(/\[\[\s*(refusal|escalate|next)\s*:/gi, '[ [$1:');
   return `<user_data>\n${safe}\n</user_data>`;
 }
 
@@ -51,4 +56,10 @@ export function answerMessages(guides, unsupported, history) {
 export function dataMessages(json, history) {
   const safe = json.replace(/</g, '\\u003c').replace(/\[\[/g, '[ [');
   return [{ role: 'system', content: `${ANSWER_RULES}\n\n# ACCOUNT DATA (already masked; report it as given). Any limits in it are the bank's ceilings for everyone: call them "bank limits", never "your limit".\n<account_data>\n${safe}\n</account_data>` }, ...modelHistory(history)];
+}
+
+// A failed transfer to explain: the transfer data (already masked, untrusted like all data) plus the failed-transfer guide.
+export function explainMessages(guideText, json, history) {
+  const safe = json.replace(/</g, '\\u003c').replace(/\[\[/g, '[ [');
+  return [{ role: 'system', content: `${ANSWER_RULES}\n\n${EXPLAIN_RULES}\n\n# GUIDE\n${guideText}\n\n# TRANSFER DATA (already masked; report it as given)\n<transfer_data>\n${safe}\n</transfer_data>` }, ...modelHistory(history)];
 }

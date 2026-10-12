@@ -7,8 +7,9 @@ import { BUSY, LimitError, createLimiter } from './limits.js';
 import { parseRefusal, refusalCard } from './refusals.js';
 import { BLOCKED, createOutputFilter } from './filter.js';
 import { chipState, cuesIn, parseEscalate, questionKey } from './chip.js';
-import { PROTECTED_TEXTS, modelHistory, UNSUPPORTED_ID, answerMessages, dataMessages, routerMessages } from './prompts.js';
+import { PROTECTED_TEXTS, modelHistory, UNSUPPORTED_ID, answerMessages, dataMessages, explainMessages, routerMessages } from './prompts.js';
 import { intentTool } from './intents.js';
+import { GUIDE_ID, NEXT_STEP, OUTCOMES, TEXT as EXPLAIN_TEXT, parseNext } from './explain.js';
 import { MESSAGES as T1_MESSAGES, TOOL_RULES, UNLOCK_MS, createT1, parseToolCall } from './t1.js';
 import { ownerOf, subjectOf, tokenOf } from './identity.js';
 
@@ -262,16 +263,19 @@ export function createService({ devPage, model, gateway, clock, audit, guides, s
     let filtered = null;
     let limited = null;
     let toolAudit = null;
+    let nextTag = null;
     // The model's text is held back until it has been read in full: the refusal
     // tag comes off the front before anything reaches the customer.
-    const answer = async (messages) => {
+    const answer = async (messages, { known } = {}) => {
       let raw = '';
       for await (const text of turnModel.chat({ purpose: 'answer', messages, language, onServed: (info) => { served = info; } })) raw += text;
       const refused = parseRefusal(raw);
       const escalated = parseEscalate(refused.text);
-      const parsed = { category: refused.category, text: escalated.text };
+      const nexted = parseNext(escalated.text);
+      nextTag = nexted.next;
+      const parsed = { category: refused.category, text: nexted.text };
       if (escalated.reason) chipReasons.push(escalated.reason);
-      const leak = checkOutput(parsed.text);
+      const leak = checkOutput(parsed.text, { known });
       if (leak) {
         filtered = leak;
         chipReasons.push('blocked');
@@ -283,6 +287,36 @@ export function createService({ devPage, model, gateway, clock, audit, guides, s
       refusal = parsed.category ?? refusal;
       reply += parsed.text;
       send(res, 'delta', { text: parsed.text });
+    };
+    // Explain my failure: the transfer's status data and the failed-transfer guide only. Only a plain "failed"
+    // record is worded by the model; every other outcome is fixed text. Whatever happens, the explanation ends
+    // with exactly one next step, and a human next step makes the chip prominent.
+    const explain = async ({ result }, material) => {
+      const { outcome } = result;
+      const { reference } = result; // as the customer typed it: the id they can see, not clientReferenceId
+      const t = result.transaction;
+      const d = result.detail;
+      let next = OUTCOMES[outcome]?.next ?? null;
+      if (outcome !== 'not_found') {
+        guideIds = [GUIDE_ID];
+        send(res, 'guides', { guides: [{ id: GUIDE_ID, title: material.title }] });
+      }
+      if (outcome === 'failed') {
+        await answer(explainMessages(material.text, JSON.stringify({ transaction: t, detail: d }), history), { known: [reference] });
+        next = nextTag === 'retry' ? 'retry' : 'human';
+        if (next === 'human') chipReasons.push('contact_bank');
+      } else {
+        const text = outcome === 'not_found' ? EXPLAIN_TEXT.not_found[language](reference) : EXPLAIN_TEXT[outcome][language](t, d);
+        reply += text;
+        send(res, 'delta', { text });
+        if (OUTCOMES[outcome].chip) chipReasons.push(OUTCOMES[outcome].chip);
+      }
+      // a refusal or a blocked reply already carries its own fixed next-step card
+      if (refusal || filtered) return;
+      const text = `\n\n${NEXT_STEP[next][language](reference)}`;
+      reply += text;
+      send(res, 'delta', { text });
+      send(res, 'next_step', { kind: next, ...(next === 'history' ? { target: 'history' } : {}), text: text.trim() });
     };
     try {
       if (guides) {
@@ -298,7 +332,8 @@ export function createService({ devPage, model, gateway, clock, audit, guides, s
             const masked = JSON.stringify(done.result);
             toolAudit = { name: done.name, outcome: 'ok', data: masked, source: routed.toolSource };
             send(res, 'tool', { name: done.name, result: done.result });
-            await answer(dataMessages(masked, history));
+            if (done.name === 'explain_failure') await explain(done, guides.get(GUIDE_ID)[language]);
+            else await answer(dataMessages(masked, history));
             if (done.notice && !filtered) {
               const text = `\n\n${T1_MESSAGES[done.notice][language]}`;
               reply += text;

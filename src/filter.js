@@ -27,8 +27,12 @@ export function createOutputFilter({ allowlist = {}, protectedTexts = [] } = {})
     for (let i = 0; i + ECHO_WORDS <= w.length; i++) shingles.add(w.slice(i, i + ECHO_WORDS).join(' '));
   }
 
-  // Returns the first reason the text is blocked, or null when it is clean.
-  return function check(text) {
+  // Returns the first reason the text is blocked, or null when it is clean. `known` lists strings the customer
+  // supplied themselves (a transfer reference whose digits can look like a phone number); they are ignored
+  // for the URL, email and phone checks and for nothing else.
+  return function check(fullText, { known = [] } = {}) {
+    let text = fullText;
+    for (const k of known) text = text.replaceAll(new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), ' ');
     const urls = text.match(URL_) ?? [];
     if (urls.some((u) => !okHosts.has(hostOf(u)))) return 'url';
     let rest = text.replace(URL_, ' ');
@@ -36,7 +40,7 @@ export function createOutputFilter({ allowlist = {}, protectedTexts = [] } = {})
     if (found.some((e) => !okEmails.has(e.toLowerCase()))) return 'email';
     rest = rest.replace(EMAIL, ' ');
     if ((rest.match(PHONE) ?? []).some((p) => !okPhones.has(digits(p)))) return 'phone';
-    const w = words(text);
+    const w = words(fullText);
     for (let i = 0; i + ECHO_WORDS <= w.length; i++) if (shingles.has(w.slice(i, i + ECHO_WORDS).join(' '))) return 'prompt_echo';
     return null;
   };

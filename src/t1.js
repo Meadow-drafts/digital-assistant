@@ -4,6 +4,7 @@
 // Read-only: every gateway call below is a lookup.
 import { UnknownTenantError } from './gateway.js';
 import { subjectOf } from './identity.js';
+import { classify } from './explain.js';
 
 const ETAB = '001';
 const MAX_ROWS = 20;
@@ -50,6 +51,24 @@ function dateOf(v) {
   return /^\d{4}-\d{2}-\d{2}/.exec(String(v ?? ''))?.[0] ?? null;
 }
 
+// Leg statuses are StatusCode strings in the backend: 01 success, 100 failed, 1000 pending, 200 not started.
+const LEG = { '01': 'success', 100: 'failed', 1000: 'pending', 200: 'not_started' };
+const leg = (v) => (v == null || v === '' ? null : LEG[String(v)] ?? 'other');
+
+// The status record for the "explain my failure" read: the outcome fields only. Free text from the backend
+// (msg) is capped and has long digit runs masked; who reversed or re-debited it is never passed on.
+function statusDetail(r) {
+  const msg = String(r.msg ?? '').replace(/\d{6,}/g, (d) => `****${d.slice(-4)}`).trim().slice(0, 200);
+  return {
+    msg: msg || null,
+    msgCode: /^[A-Za-z0-9_.-]{1,20}$/.test(String(r.msgCode ?? '')) ? String(r.msgCode) : null,
+    legs: { digitalBank: leg(r.digitalBankStatus), makeOperation: leg(r.makeOperationStatus), fees: leg(r.statusFees) },
+    reDebited: r.reDebited === true,
+    reversing: r.reversing === true,
+    reversedAt: r.reversedAt ? dateOf(r.reversedAt) : null,
+  };
+}
+
 const involves = (r, wallet) => r?.codewaldo === wallet || r?.codewalop === wallet;
 
 function maskTransaction(r, wallet) {
@@ -81,6 +100,10 @@ const TOOLS = {
     allowed: ['reference'],
     args: (a) => (typeof a.reference === 'string' && REFERENCE.test(a.reference) ? { reference: a.reference } : null),
   },
+  explain_failure: {
+    allowed: ['reference'],
+    args: (a) => (typeof a.reference === 'string' && REFERENCE.test(a.reference) ? { reference: a.reference } : null),
+  },
   fees_limits: { allowed: [], args: () => ({}) },
   balance: {
     packages: ['SOLDE', 'BALA'],
@@ -97,7 +120,8 @@ const TOOLS = {
 // Tool prompt text lives here beside the list it describes.
 export const TOOL_RULES = 'If the user asks about their own recent transactions, the status of one transfer by its reference, or fees and limits, ' +
   'reply with ONLY one tool tag instead of guide ids: [[tool:last_transactions {"count":5}]] (count 1-20, optional), ' +
-  '[[tool:transfer_status {"reference":"<reference the user gave>"}]], or [[tool:fees_limits {}]], or [[tool:balance {}]] for the account balance ("kind":"ledger" only if the user asks for the ledger balance). ' +
+  '[[tool:transfer_status {"reference":"<reference the user gave>"}]], ' +
+  '[[tool:explain_failure {"reference":"<reference the user gave>"}]] (instead of transfer_status when they ask WHY that transfer failed or did not arrive), or [[tool:fees_limits {}]], or [[tool:balance {}]] for the account balance ("kind":"ledger" only if the user asks for the ledger balance). ' +
   'Examples that need a tool tag: "what is my balance", "how much do I have", "show my balance", "quel est mon solde", "combien j\'ai sur mon compte" -> [[tool:balance {}]]; ' +
   '"my last transactions", "show my recent transactions", "mes dernières transactions" -> [[tool:last_transactions {}]]; "what are the fees and limits", "quels sont les frais et plafonds" -> [[tool:fees_limits {}]]. ' +
   'Never put account numbers, phone numbers or other ids in a tool tag.';
@@ -137,11 +161,18 @@ const shape = (body) => {
 };
 
 export function createT1({ gateway, clock, etab = ETAB }) {
-  async function call(tenant, token, req) {
+  // What failed, for the audit: the error's code or name only (ECONNRESET, TimeoutError...), never its message.
+  const why = (e) => `gateway ${String(e?.cause?.code ?? e?.code ?? e?.name ?? 'error').replace(/[^A-Za-z0-9_]/g, '').slice(0, 30)}`.trim();
+
+  // Every call is a lookup except the PIN check, which counts attempts and passes `retry: false`. A request that
+  // throws at the network level (typically a dropped idle connection) is tried once more; a timeout is not.
+  async function call(tenant, token, req, { retry = true } = {}) {
     let res;
-    try { res = await gateway.request({ tenant, token, ...req }); } catch (e) {
-      if (e instanceof UnknownTenantError) throw new Unavailable('tenant');
-      throw new Unavailable('gateway');
+    for (let attempt = 1; !res; attempt++) {
+      try { res = await gateway.request({ tenant, token, ...req }); } catch (e) {
+        if (e instanceof UnknownTenantError) throw new Unavailable('tenant');
+        if (!retry || attempt > 1 || e?.name === 'TimeoutError') throw new Unavailable(why(e));
+      }
     }
     if (res.status === 401 || res.status === 409) throw new SessionExpired();
     if (res.status !== 200) throw new Unavailable(`http ${res.status} ${shape(res.body)}`);
@@ -185,6 +216,26 @@ export function createT1({ gateway, clock, etab = ETAB }) {
     }
   }
 
+  // The status row for a reference, only if it is this session's wallet's. The backend looks the reference up
+  // across everyone, so any other row is treated exactly like a missing one.
+  async function ownStatus(session, reference, ctx) {
+    const body = await call(ctx.tenant, ctx.token, {
+      method: 'GET', path: '/digitalbank/history/transactions',
+      query: { cli: session.cli, clientRefId: reference }, // as the portal asks
+    });
+    return body?.data && involves(body.data, session.wallet) ? body.data : null;
+  }
+
+  // The customer's own rows from the wallet-scoped history list, the same list the portal shows.
+  async function ownRows(session, ctx) {
+    const body = await call(ctx.tenant, ctx.token, {
+      method: 'POST', path: '/digitalbank/history/bipay-recent', query: { wallet: session.wallet },
+      body: { codewaldo: session.wallet, etab: session.etab },
+    });
+    if (!Array.isArray(body?.data)) throw new Unavailable('history');
+    return body.data.filter((r) => involves(r, session.wallet));
+  }
+
   const reads = {
     async balance(session, { account, kind }, ctx) {
       const acc = session.accounts[account];
@@ -198,23 +249,24 @@ export function createT1({ gateway, clock, etab = ETAB }) {
       return { balances: [{ account: maskAccount(acc.accountNo), kind, amount, currency: acc.dev ?? null }] };
     },
     async last_transactions(session, { count }, ctx) {
-      const body = await call(ctx.tenant, ctx.token, {
-        method: 'POST', path: '/digitalbank/history/bipay-recent', query: { wallet: session.wallet },
-        body: { codewaldo: session.wallet, etab: session.etab },
-      });
-      if (!Array.isArray(body?.data)) throw new Unavailable('history');
-      const own = body.data.filter((r) => involves(r, session.wallet));
+      const own = await ownRows(session, ctx);
       own.sort((a, b) => String(dateOf(b.dop)).localeCompare(String(dateOf(a.dop))));
       return { transactions: own.slice(0, count).map((r) => maskTransaction(r, session.wallet)) };
     },
     async transfer_status(session, { reference }, ctx) {
-      const body = await call(ctx.tenant, ctx.token, {
-        method: 'GET', path: '/digitalbank/history/transactions',
-        query: { cli: session.cli, clientRefId: reference }, // as the portal asks
-      });
-      // the backend looks the reference up across everyone, so a row that is not this wallet's is treated as not found
-      const found = body?.data && involves(body.data, session.wallet) ? body.data : null;
+      const found = await ownStatus(session, reference, ctx);
       return found ? { found: true, transaction: maskTransaction(found, session.wallet) } : { found: false, reference };
+    },
+    async explain_failure(session, { reference }, ctx) {
+      // The table shows ntrans or nhis, not clientReferenceId, so any of the three finds it. Only the customer's own
+      // list is searched: the by-reference endpoint can take 15 s or more and would answer differently for
+      // someone else's reference than for an unknown one.
+      const wanted = reference.toLowerCase();
+      const found = (await ownRows(session, ctx)).find((r) => [r.clientReferenceId, r.ntrans, r.nhis].some((id) => String(id ?? '').toLowerCase() === wanted));
+      if (!found) return { found: false, reference, outcome: 'not_found' };
+      const transaction = { ...maskTransaction(found, session.wallet), reference }; // the id the customer can see
+      const detail = statusDetail(found);
+      return { found: true, reference, transaction, detail, outcome: classify({ status: transaction.status, detail }) };
     },
     async fees_limits(session, _args, ctx) {
       const body = await call(ctx.tenant, ctx.token, { method: 'GET', path: '/digitalbank/plafond/montant', query: { etab: session.etab } });
@@ -275,7 +327,7 @@ export function createT1({ gateway, clock, etab = ETAB }) {
     if (typeof pinHash !== 'string' || !PIN_HASH.test(pinHash)) return { error: 'bad_request' };
     const { session } = conversation;
     let body;
-    try { body = await call(session.tenant, token, { method: 'POST', path: '/digitalbank/checkPin', body: { pin: pinHash, tel: session.wallet } }); } catch (e) {
+    try { body = await call(session.tenant, token, { method: 'POST', path: '/digitalbank/checkPin', body: { pin: pinHash, tel: session.wallet } }, { retry: false }); } catch (e) {
       if (e instanceof SessionExpired) { conversation.session = null; conversation.unlock = null; return { error: 'session_expired' }; }
       return { error: 'unavailable' };
     }
