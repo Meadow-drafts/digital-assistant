@@ -94,7 +94,7 @@ export function createDrafts({ t1, entitlementsFor, conversations, handoff, supp
     const words = draft.scrub(maskText(shielded.text));
     const lines = draft.details.map((d) => `${d.label}: ${d.value}`);
     const content = lines.length ? `${words}\n\n${DETAILS_HEADING[language]}\n${lines.join('\n')}` : words;
-    draft.ref ??= handoff.openCaseFor(draft.conversationId)?.ref ?? handoff.reserveRef();
+    draft.ref = handoff.caseRefFor(draft.conversationId, { reopen: body.destination !== 'email' }) ?? draft.ref ?? handoff.reserveRef();
     const shown = {
       destination: body.destination,
       ...(body.destination !== 'email' ? { chat: { text: content } } : {}),
@@ -114,12 +114,13 @@ export function createDrafts({ t1, entitlementsFor, conversations, handoff, supp
     if (!draft.preview || body.previewToken !== draft.preview.token) { json(res, 409, { error: 'not_previewed' }); return; }
     if (draft.sent) { json(res, 409, { error: 'already_sent' }); return; }
     // A case opened since the preview has its own reference: what was shown (the subject) would no longer be true.
-    if ((handoff.openCaseFor(draft.conversationId)?.ref ?? draft.ref) !== draft.ref) { json(res, 409, { error: 'case_changed' }); return; }
+    const current = handoff.caseRefFor(draft.conversationId, { reopen: draft.preview.destination !== 'email' });
+    if (current ? current !== draft.ref : handoff.refInUse(draft.ref)) { json(res, 409, { error: 'case_changed' }); return; }
     draft.sent = true; // before any await: a second confirm cannot send it twice
     const conversation = conversations.get(draft.conversationId);
     const { language } = conversation;
     const { destination, content, email } = draft.preview;
-    const filing = { conversationId: draft.conversationId, conversation, tenant: draft.tenant, ref: draft.ref, text: content };
+    const filing = { conversationId: draft.conversationId, conversation, tenant: draft.tenant, ref: draft.ref, text: content, req };
     const record = (outcome) => audit.append({
       time: new Date(clock.now()).toISOString(), user: draft.owner, tenant: draft.tenant, conversationId: draft.conversationId,
       userText: '', replyText: '', outcome, caseRef: draft.ref, destination,

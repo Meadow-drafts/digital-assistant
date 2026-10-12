@@ -109,3 +109,25 @@ test('the page link from the paging email opens that case after login', async (t
   await w.until(() => w.q('detail-ref')?.textContent.includes(ref));
   await w.until(() => w.qa('line').some((l) => l.textContent.includes('Hello there')));
 });
+
+test('an agent transfers the case from the console to a colleague, who then sees it', async (t) => {
+  const svc = await startService({ model: createFakeModel(['ok']) });
+  t.after(svc.close);
+  const c = await customer(svc.baseUrl);
+  const { ref } = (await c.handoff()).body;
+  const w = await openConsole(svc, t);
+  await signIn(w);
+  await w.until(() => row(w, ref));
+  row(w, ref).click();
+  await w.until(() => w.q('detail-ref')?.textContent.includes(ref));
+  assert.equal(w.q('transfer').disabled, true, 'nothing to transfer before the case is yours');
+
+  w.q('claim').click();
+  await w.until(() => !w.q('transfer').disabled);
+  assert.deepEqual([...w.q('transfer-to').options].map((o) => o.textContent), ['Paul Etoga'], 'only colleagues are offered');
+  w.q('transfer').click();
+
+  await w.until(() => /paul/i.test(w.q('detail-state').textContent));
+  assert.equal(w.q('transfer').disabled, true, 'it is no longer yours');
+  assert.equal((await c.status()).body.agent.firstName, 'Paul');
+});

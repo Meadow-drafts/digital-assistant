@@ -27,6 +27,10 @@
     [data-role="line"][data-from="agent"] { justify-self: end; background: #dbeafe; }
     [data-role="line"][data-from="bot"] { background: #eef0f3; }
     [data-role="line"][data-from="system"] { justify-self: center; background: none; color: #6b6b66; font-style: italic; }
+    h3 { font-size: .8rem; margin: 0 0 .25rem; color: #6b6b66; }
+    .block { background: #faf9f5; border: 1px solid #dcdad2; border-radius: 6px; padding: .5rem .75rem; margin: .5rem 0; white-space: pre-wrap; }
+    [data-role="record"] { font-variant-numeric: tabular-nums; padding: .15rem 0; border-top: 1px solid #ecebe4; }
+    .flag { background: #fee2e2; color: #991b1b; border-radius: 4px; padding: 0 .4rem; font-weight: 600; font-size: 12px; }
     .who { display: block; font-size: 11px; color: #6b6b66; }
     .row { display: flex; gap: .5rem; margin: .25rem 0; }
     .row input { flex: 1; }
@@ -56,11 +60,16 @@
       </section>
       <section class="card" data-role="detail" hidden>
         <h2 data-role="detail-ref"></h2>
-        <p>State: <b data-role="detail-state"></b> · Claimed by: <span data-role="detail-claimed-by"></span></p>
-        <div data-role="transcript"></div>
+        <p>State: <b data-role="detail-state"></b> · Claimed by: <span data-role="detail-claimed-by"></span> <span class="flag" data-role="priority" hidden>PRIORITY: wrong transfer</span></p>
+        <div data-role="draft" class="block" hidden><h3>Customer's draft</h3><div data-role="draft-text"></div></div>
+        <div data-role="summary" class="block" hidden><h3 data-role="summary-label"></h3><div data-role="summary-text"></div></div>
+        <div data-role="records-box" class="block" hidden><h3>Recent transactions (masked)</h3><div data-role="records"></div></div>
+        <details data-role="transcript-box"><summary>Raw transcript</summary><div data-role="transcript"></div></details>
         <div class="row">
           <button class="primary" data-role="claim" type="button">Claim this case</button>
           <button data-role="resolve" type="button">Mark resolved</button>
+          <select data-role="transfer-to" aria-label="Colleague to transfer to"></select>
+          <button data-role="transfer" type="button">Transfer</button>
         </div>
         <p class="error" data-role="claim-error" role="alert"></p>
         <form data-role="reply-form" class="row">

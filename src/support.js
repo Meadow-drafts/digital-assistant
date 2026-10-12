@@ -5,6 +5,8 @@ import { readFileSync } from 'node:fs';
 const ADDRESS = /^[^\s<>,;"@]+@[^\s<>,;"@]+$/;
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const fail = (what) => { throw new Error(`support config: ${what}`); };
+// Every timer the support flow reads. Placeholder values from ticket 07; the bank replaces them.
+const TIMER_KEYS = ['broadcastMs', 'queuedNoticeMs', 'absentMs', 'agentSilenceMs', 'agentFollowUpMs', 'autoResolveMs', 'reopenWindowMs'];
 const positive = (v) => Number.isFinite(v) && v > 0;
 
 export function loadSupport(path) {
@@ -21,7 +23,8 @@ export function loadSupport(path) {
   if (!positive(sessionMs)) fail('agents.sessionMs must be a positive number');
 
   const timers = raw.timers ?? {};
-  for (const k of ['broadcastMs', 'queuedNoticeMs', 'absentMs']) if (!positive(timers[k])) fail(`timers.${k} must be a positive number`);
+  for (const k of TIMER_KEYS) if (!positive(timers[k])) fail(`timers.${k} must be a positive number`);
+  if (timers.agentFollowUpMs <= timers.agentSilenceMs) fail('timers.agentFollowUpMs must be later than timers.agentSilenceMs');
 
   const h = raw.hours ?? {};
   if (!Number.isInteger(h.utcOffsetMinutes) || Math.abs(h.utcOffsetMinutes) > 14 * 60) fail('hours.utcOffsetMinutes must be whole minutes from UTC');
@@ -34,7 +37,7 @@ export function loadSupport(path) {
 
   return {
     agents: { list, onCall, sessionMs },
-    timers: { broadcastMs: timers.broadcastMs, queuedNoticeMs: timers.queuedNoticeMs, absentMs: timers.absentMs },
+    timers: Object.fromEntries(TIMER_KEYS.map((k) => [k, timers[k]])),
     hours: { utcOffsetMinutes: h.utcOffsetMinutes, days: h.days, open: h.open, close: h.close },
     mail,
   };

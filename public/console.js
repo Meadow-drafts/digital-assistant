@@ -53,21 +53,50 @@ function renderQueue(cases) {
     b.dataset.ref = c.ref;
     if (c.ref === selected) b.setAttribute('aria-current', 'true');
     const wait = c.waitingSeconds === null ? '' : ` · waiting ${Math.floor(c.waitingSeconds / 60)}:${String(c.waitingSeconds % 60).padStart(2, '0')}`;
-    b.textContent = `${c.ref} · ${label(c)}${wait}`;
+    b.textContent = `${c.priority ? 'PRIORITY · ' : ''}${c.ref} · ${label(c)}${wait}`;
     b.addEventListener('click', () => { selected = c.ref; shownLines = ''; refresh(); });
     return b;
   }));
   $('queue-empty').hidden = cases.length > 0;
 }
 
+const money = (r) => `${r.amount ?? '?'}${r.currency ? ` ${r.currency}` : ''}`;
+const recordLine = (r) => [r.reference, r.date, `${r.direction === 'out' ? 'out' : 'in'} ${money(r)}`, r.status, r.account, r.counterparty].filter(Boolean).join(' · ');
+
+// The case-specific context. A case held by a colleague comes back without any, and these blocks stay hidden.
+function renderContext(d) {
+  $('priority').hidden = !d.priority;
+  $('draft').hidden = !d.draft;
+  $('draft-text').textContent = d.draft ?? '';
+  $('summary').hidden = !d.summary;
+  $('summary-label').textContent = d.summary?.label ?? '';
+  $('summary-text').textContent = d.summary?.text ?? '';
+  $('records-box').hidden = !d.records?.length;
+  $('records').replaceChildren(...(d.records ?? []).map((r) => {
+    const line = document.createElement('div');
+    line.dataset.role = 'record';
+    line.textContent = recordLine(r);
+    return line;
+  }));
+}
+
 function renderDetail(d) {
   $('detail').hidden = false;
+  renderContext(d);
   $('detail-ref').textContent = `Case ${d.ref}`;
   $('detail-state').textContent = label(d);
   $('detail-claimed-by').textContent = d.claimedBy ?? 'nobody';
   const mine = d.state === 'with_agent' && d.claimedBy === me;
   $('claim').disabled = d.state !== 'waiting';
   $('resolve').disabled = !mine;
+  // The colleagues come with the case; the choice survives the periodic refresh.
+  const names = JSON.stringify(d.colleagues ?? []);
+  if ($('transfer-to').dataset.names !== names) {
+    $('transfer-to').dataset.names = names;
+    $('transfer-to').replaceChildren(...(d.colleagues ?? []).map((a) => new Option(a.name, a.id)));
+  }
+  $('transfer-to').disabled = !mine;
+  $('transfer').disabled = !mine || !$('transfer-to').value;
   $('reply-input').disabled = !mine;
   $('reply-send').disabled = !mine;
   const key = JSON.stringify(d.transcript.map((m) => m.seq));
@@ -97,9 +126,15 @@ async function refresh() {
     if (selected && list.ok) {
       const detail = await api('GET', `/agent/cases/${encodeURIComponent(selected)}`);
       if (detail.ok) renderDetail(detail.body);
+      else if (detail.status === 403) {
+        // Another agent has it: show who, and nothing of the case itself.
+        const held = list.body.cases.find((c) => c.ref === selected);
+        shownLines = '';
+        renderDetail({ ...held, claimedBy: detail.body.claimedBy ?? held?.claimedBy ?? null, ref: selected, transcript: [] });
+      }
     }
   } catch { /* the next refresh tries again */ }
-  if (!token) return;
+  if (!token || !document?.body) return; // the page was closed while a request was in flight
   const wait = Number(document.body.dataset.pollMs ?? 3000);
   timer = setTimeout(refresh, Number.isFinite(wait) ? wait : 3000);
 }
@@ -127,6 +162,13 @@ $('claim').addEventListener('click', async () => {
 
 $('resolve').addEventListener('click', async () => {
   await api('POST', `/agent/cases/${encodeURIComponent(selected)}/resolve`);
+  refresh();
+});
+
+$('transfer').addEventListener('click', async () => {
+  $('claim-error').textContent = '';
+  const res = await api('POST', `/agent/cases/${encodeURIComponent(selected)}/transfer`, { to: $('transfer-to').value });
+  if (!res.ok) $('claim-error').textContent = 'Could not transfer this case.';
   refresh();
 });
 

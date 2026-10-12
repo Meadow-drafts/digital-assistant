@@ -87,7 +87,10 @@ export function createService({ devPage, model, gateway, clock, audit, guides, n
   const limiter = createLimiter({ clock, limits });
   const checkOutput = createOutputFilter({ allowlist: outputAllowlist, protectedTexts: PROTECTED_TEXTS });
   const conversations = new Map();
-  const handoff = createHandoff({ clock, audit, mailer, agents, support, consoleUrl, conversations });
+  const handoff = createHandoff({
+    clock, audit, mailer, agents, support, consoleUrl, conversations, model,
+    recordsFor: async ({ conversation, req, tenant }) => (t1 && req ? t1.recentMasked(conversation, tokenOf(req), await entitlementsFor(req, tenant, conversation)) : null),
+  });
 
   // Fail closed: if entitlements cannot be read, offer only guides that need
   // no package, no primary connect and fit the individual role.

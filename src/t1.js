@@ -370,5 +370,12 @@ export function createT1({ gateway, clock, etab = ETAB }) {
     };
   }
 
-  return { run, start, ownHistory, caseTransaction, unlockWithPortalFlag, unlockWithPin };
+  // The customer's latest transactions, masked, for the agent who takes their case. Same wallet-scoped list and
+  // history gating as every other read; null when history is not readable for this customer.
+  async function recentMasked(conversation, token, entitlements, count = 5) {
+    const rows = await ownHistory(conversation, token, entitlements);
+    return rows ? rows.slice(0, count).map((r) => maskTransaction(r, conversation.session.wallet)) : null;
+  }
+
+  return { run, start, ownHistory, recentMasked, caseTransaction, unlockWithPortalFlag, unlockWithPin };
 }

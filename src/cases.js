@@ -10,7 +10,7 @@ export function createCaseStore({ clock }) {
     // A reference can be reserved before its case exists, so a drafted message can show it in the email subject.
     reserveRef: () => `C-${++counter}`,
     open({ conversationId, owner, tenant, language, ref = `C-${++counter}`, state = 'waiting' }) {
-      const found = { ref, conversationId, owner, tenant: tenant ?? null, language, state, openedAt: clock.now(), agent: null, closeReason: null, solved: null, transcript: [] };
+      const found = { ref, conversationId, owner, tenant: tenant ?? null, language, state, openedAt: clock.now(), agent: null, closeReason: null, solved: null, transcript: [], transfers: [], linkedTo: null };
       cases.set(ref, found);
       return found;
     },
@@ -27,14 +27,28 @@ export function createCaseStore({ clock }) {
       c.claimedAt = clock.now();
       return { ok: true, case: c };
     },
+    // A customer who asks again inside the window gets the same case back, with the agent who had it.
+    reopen(c) {
+      c.state = 'with_agent';
+      c.closeReason = null;
+      c.resolvedAt = null;
+      c.solved = null;
+      c.reopenedAt = clock.now();
+    },
+    // Hands the case to a colleague. The case itself (transcript, draft, summary, records, priority) does not move.
+    transfer(c, agent) {
+      c.transfers.push({ from: c.agent.id, to: agent.id, at: clock.now() });
+      c.agent = agent;
+    },
     resolve(c, reason = 'resolved_by_agent') {
       c.state = 'resolved';
       c.closeReason = reason;
       c.resolvedAt = clock.now();
     },
     // One message on the case. seq counts every entry, so a reader keeps a cursor and asks for what is newer.
-    append(c, from, text) {
-      const entry = { seq: c.transcript.length + 1, from, text, at: clock.now() };
+    // `extra` marks an entry the customer is allowed to see even though it is not an agent's (public: true).
+    append(c, from, text, extra = {}) {
+      const entry = { seq: c.transcript.length + 1, from, text, at: clock.now(), ...extra };
       c.transcript.push(entry);
       return entry;
     },

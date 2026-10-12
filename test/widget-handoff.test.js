@@ -173,3 +173,20 @@ test('after 15 minutes unclaimed the banner tells the customer the case is queue
   assert.match(w.q('case-notice').textContent, /within 24 hours/i, 'the honest expectation stays');
   assert.ok(w.q('case-cancel'), 'the case is still open and can be cancelled');
 });
+
+test('the soft "still working on it" and the transfer notice show as notes, not as agent messages', async (t) => {
+  const svc = await startService({ model: createFakeModel(['Hi there.']) });
+  t.after(svc.close);
+  const w = await askForAgent(svc, t);
+  const aline = await agentLogin(svc.baseUrl, 'aline');
+  await aline.claim(refOf(w));
+  await w.until(() => /with an agent/i.test(w.q('case-state').textContent));
+
+  await svc.clock.advance(10 * 60_000);
+  await w.until(() => w.qa('case-note').some((n) => /still working on it/i.test(n.textContent)));
+  await aline.transfer(refOf(w), 'paul');
+  await w.until(() => w.qa('case-note').some((n) => /colleague/i.test(n.textContent)));
+
+  assert.equal(w.qa('message').filter((m) => m.dataset.from === 'agent').length, 0, 'no agent bubble was invented');
+  assert.doesNotMatch(w.document.body.textContent, /Aline Mbarga|Paul Etoga/);
+});

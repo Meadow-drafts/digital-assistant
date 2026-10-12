@@ -427,7 +427,7 @@ class BankAssistant extends HTMLElement {
   applyCase(view) {
     const before = this.caseView?.state ?? 'bot';
     this.caseView = view;
-    for (const m of view.messages ?? []) this.addMessage('agent', m.text);
+    for (const m of view.messages ?? []) { if (m.from === 'system') this.addNote(m.text); else this.addMessage('agent', m.text); }
     if (Number.isInteger(view.next)) this.cursor = view.next;
     if (view.state === 'with_agent' && before !== 'with_agent') this.addNote(TEXT[this.lang].agentJoined(view.agent?.firstName ?? ''));
     if (view.state === 'resolved' && before !== 'resolved') {
