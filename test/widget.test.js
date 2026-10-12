@@ -78,3 +78,15 @@ test('no chip is shown when no guide was used', async (t) => {
   await w.until(() => w.qa('message').some((m) => m.dataset.from === 'assistant' && /no verified steps/i.test(m.textContent)));
   assert.equal(w.q('guides-used'), null);
 });
+
+test('a secret-like message shows the fixed warning in the transcript, in the customer language', async (t) => {
+  const svc = await startService();
+  t.after(svc.close);
+  const w = await openWidget(svc.baseUrl);
+
+  await w.send('mon code pin est 4821, mon virement échoue');
+  await w.until(() => w.qa('warning').length === 1);
+
+  assert.match(w.q('warning').textContent, /Ne partagez jamais votre PIN, pas même avec la banque/);
+  assert.equal(w.q('messages').contains(w.q('warning')), true);
+});

@@ -2,6 +2,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { detectLanguage } from './language.js';
+import { WARNING, shield } from './shield.js';
 import { UNSUPPORTED_ID, answerMessages, routerMessages } from './prompts.js';
 
 const PUBLIC = new URL('../public/', import.meta.url);
@@ -84,16 +85,20 @@ export function createService({ model, clock, audit, guides, entitlements, faile
     try { body = await readJson(req); } catch { res.writeHead(400).end(); return; }
     if (typeof body?.message !== 'string' || !body.message.trim()) { res.writeHead(400).end(); return; }
 
+    // Everything past this point sees only the redacted text; the raw message is never stored.
+    const shielded = shield(body.message);
+    const message = shielded.text;
     const conversationId = body.conversationId ?? randomUUID();
     const conversation = conversations.get(conversationId) ?? { history: [], language: 'en' };
     const { history } = conversation;
     conversation.language = detectLanguage(body.message, conversation.language);
     const { language } = conversation;
-    history.push({ role: 'user', content: body.message });
+    history.push({ role: 'user', content: message });
     conversations.set(conversationId, conversation);
 
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
     send(res, 'thinking', {});
+    if (shielded.flagged) send(res, 'warning', { code: 'secret_input', text: WARNING[language] });
     const startedAt = clock.now();
     let reply = '';
     let outcome = 'ok';
@@ -109,7 +114,7 @@ export function createService({ model, clock, audit, guides, entitlements, faile
         send(res, 'guides', { guides: used.map((g) => ({ id: g.id, title: g[language].title })) });
         if (picks.length === 0) {
           emit(NO_VERIFIED_STEPS[language]);
-          await failedQuestions?.append({ time: new Date(clock.now()).toISOString(), conversationId, tenant: body.tenant ?? null, language, question: body.message });
+          await failedQuestions?.append({ time: new Date(clock.now()).toISOString(), conversationId, tenant: body.tenant ?? null, language, question: message });
         } else {
           const material = picks.map((id) => guides.get(id)?.[language] ?? null).filter(Boolean);
           const messages = answerMessages(material, picks.includes(UNSUPPORTED_ID) ? guides.unsupported : '', history);
@@ -131,7 +136,7 @@ export function createService({ model, clock, audit, guides, entitlements, faile
       user: pseudonym(req),
       tenant: body.tenant ?? null,
       conversationId,
-      userText: body.message,
+      userText: message,
       replyText: reply,
       language,
       guideIds,

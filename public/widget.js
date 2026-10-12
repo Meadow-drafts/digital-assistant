@@ -92,6 +92,8 @@ class BankAssistant extends HTMLElement {
         if (ev.type === 'delta') {
           bubble ??= this.addMessage('assistant');
           bubble.textContent += ev.text;
+        } else if (ev.type === 'warning') {
+          this.addMessage('assistant', ev.text).dataset.role = 'warning';
         } else if (ev.type === 'guides') {
           guides = ev.guides;
         } else if (ev.type === 'done') {
