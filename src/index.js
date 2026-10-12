@@ -3,6 +3,7 @@ import { createFileAudit } from './audit.js';
 import { createModel, loadModelConfig } from './model.js';
 import { loadGuides } from './guides.js';
 import { loadLimits } from './limits.js';
+import { loadScamCues } from './scam.js';
 
 // Demo entry point. With MODEL_PRIMARY_* set in the environment (see
 // loadModelConfig) the real OpenAI-compatible chain is used; otherwise a
@@ -30,6 +31,7 @@ const outputAllowlist = { urlHosts: list('OUTPUT_ALLOW_URL_HOSTS'), emails: list
 const port = Number(process.env.PORT ?? 3000);
 
 const modelConfig = loadModelConfig(process.env);
-createService({ model: modelConfig ? createModel(modelConfig) : scriptedModel, clock, audit, guides, failedQuestions, outputAllowlist, limits: loadLimits(process.env) }).listen(port, () => {
+const scamCues = loadScamCues(process.env.SCAM_CUES ?? new URL('../config/scam-cues.json', import.meta.url));
+createService({ model: modelConfig ? createModel(modelConfig) : scriptedModel, clock, audit, guides, scamCues, failedQuestions, outputAllowlist, limits: loadLimits(process.env) }).listen(port, () => {
   console.log(`assistant demo host: http://localhost:${port}/`);
 });

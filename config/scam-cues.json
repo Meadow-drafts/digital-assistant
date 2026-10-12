@@ -1,0 +1,21 @@
+{
+  "_comment": "Scam cue phrases per category and language. Matched case-, accent- and punctuation-insensitively as whole words. Add phrases or whole categories here; no code change needed. A new category may carry its own fixed 'warning' {en, fr}; otherwise the generic warning is used.",
+  "categories": {
+    "impersonation_call": {
+      "en": ["he is from the bank", "she is from the bank", "they are from the bank", "caller from the bank", "calling from the bank", "called from the bank", "claims to be from the bank", "pretending to be", "pretends to be", "says he is a bank agent", "says she is a bank agent"],
+      "fr": ["il est de la banque", "elle est de la banque", "ils sont de la banque", "appel de la banque", "appelle de la part de la banque", "se fait passer pour", "se faisant passer pour", "se disant agent de la banque"]
+    },
+    "otp_request": {
+      "en": ["asking me for the code", "asks me for the code", "asked me for the code", "asking for my code", "asking for my otp", "asking for my pin", "asked for my otp", "asked for my pin", "send him the code", "send her the code", "share the code i received"],
+      "fr": ["me demande le code", "me demandent le code", "demande mon code", "demande mon otp", "demande mon pin", "demandent mon code", "me demande mon code", "envoyer le code recu", "donner le code recu"]
+    },
+    "prize_or_fee_pressure": {
+      "en": ["won a prize", "won a lottery", "won the lottery", "won a gift", "claim your prize", "pay a fee to claim", "pay a fee to get", "pay a fee to receive", "pay a fee to release", "pay fees to release", "pay a fee to unlock"],
+      "fr": ["gagne un lot", "gagne un prix", "gagne a la loterie", "gagne un cadeau", "payer des frais pour recevoir", "payer des frais pour obtenir", "payer des frais pour debloquer", "payer des frais pour recuperer"]
+    },
+    "reverse_by_sending_more": {
+      "en": ["send more money to reverse", "send money to reverse", "send more money to cancel", "send money to cancel", "pay more to reverse", "pay to reverse", "pay to cancel the transfer"],
+      "fr": ["envoyer de l argent pour annuler", "envoyer plus d argent pour annuler", "envoyer de l argent pour rembourser", "envoyer de l argent pour reverser", "payer pour annuler le virement", "payer pour recuperer mon argent"]
+    }
+  }
+}

@@ -75,7 +75,7 @@ async function routeGuides({ model, language, available, guides, history }) {
   return { picks: [...new Set(picks)].filter((id) => allowed.has(id)).slice(0, MAX_GUIDES), refusal: null };
 }
 
-export function createService({ model, clock, audit, guides, entitlements, failedQuestions, outputAllowlist, limits }) {
+export function createService({ model, clock, audit, guides, scamCues, entitlements, failedQuestions, outputAllowlist, limits }) {
   const limiter = createLimiter({ clock, limits });
   const checkOutput = createOutputFilter({ allowlist: outputAllowlist, protectedTexts: PROTECTED_TEXTS });
   const conversations = new Map();
@@ -131,6 +131,8 @@ export function createService({ model, clock, audit, guides, entitlements, faile
     }
     const { history } = conversation;
     const chipReasons = cuesIn(message);
+    const scam = scamCues?.match(message) ?? [];
+    if (scam.length) chipReasons.push('scam_cue');
     const key = questionKey(message);
     if (key && conversation.asked.has(key)) chipReasons.push('repeated_question');
     if (key) conversation.asked.add(key);
@@ -141,6 +143,7 @@ export function createService({ model, clock, audit, guides, entitlements, faile
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
     send(res, 'thinking', {});
     if (shielded.flagged) send(res, 'warning', { code: 'secret_input', text: WARNING[language] });
+    for (const category of scam) send(res, 'warning', { code: 'scam_cue', category, text: scamCues.warning(category, language) });
     const startedAt = clock.now();
     let reply = '';
     let outcome = 'ok';
@@ -231,6 +234,7 @@ export function createService({ model, clock, audit, guides, entitlements, faile
       ...(limited ? { limit: limited } : {}),
       ...(filtered ? { filter: filtered } : {}),
       ...(refusal ? { refusalCategory: refusal } : {}),
+      ...(scam.length ? { scamCues: scam } : {}),
     });
     res.end();
   }
