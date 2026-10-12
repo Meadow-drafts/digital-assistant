@@ -34,8 +34,8 @@ export function asData(text) {
 
 export const modelHistory = (history) => history.map((m) => (m.role === 'user' ? { ...m, content: asData(m.content) } : m));
 
-export function routerMessages(index, history) {
-  const system = `${ROUTER_RULES}\n\n${index.map(({ id, title }) => `${id}: ${title}`).join('\n')}`;
+export function routerMessages(index, history, { tools = '' } = {}) {
+  const system = `${ROUTER_RULES}${tools ? ` ${tools}` : ''}\n\n${index.map(({ id, title }) => `${id}: ${title}`).join('\n')}`;
   return [{ role: 'system', content: system }, ...modelHistory(history.slice(-4))];
 }
 
@@ -43,4 +43,12 @@ export function answerMessages(guides, unsupported, history) {
   const parts = guides.map((g) => g.text);
   if (unsupported) parts.push(`# NOT AVAILABLE IN THE PORTAL\n${unsupported}`);
   return [{ role: 'system', content: `${ANSWER_RULES}\n\n# GUIDES\n${parts.join('\n\n---\n\n')}` }, ...modelHistory(history)];
+}
+
+// Data read for the customer (already masked). Anything inside it, such as a
+// reference the customer typed, is untrusted: it cannot close the block or
+// forge a control tag.
+export function dataMessages(json, history) {
+  const safe = json.replace(/</g, '\\u003c').replace(/\[\[/g, '[ [');
+  return [{ role: 'system', content: `${ANSWER_RULES}\n\n# ACCOUNT DATA (already masked; report it as given). Any limits in it are the bank's ceilings for everyone: call them "bank limits", never "your limit".\n<account_data>\n${safe}\n</account_data>` }, ...modelHistory(history)];
 }

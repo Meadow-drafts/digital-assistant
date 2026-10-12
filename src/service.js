@@ -1,19 +1,32 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { detectLanguage } from './language.js';
 import { WARNING, shield } from './shield.js';
 import { BUSY, LimitError, createLimiter } from './limits.js';
 import { parseRefusal, refusalCard } from './refusals.js';
 import { BLOCKED, createOutputFilter } from './filter.js';
 import { chipState, cuesIn, parseEscalate, questionKey } from './chip.js';
-import { PROTECTED_TEXTS, modelHistory, UNSUPPORTED_ID, answerMessages, routerMessages } from './prompts.js';
+import { PROTECTED_TEXTS, modelHistory, UNSUPPORTED_ID, answerMessages, dataMessages, routerMessages } from './prompts.js';
+import { intentTool } from './intents.js';
+import { MESSAGES as T1_MESSAGES, TOOL_RULES, UNLOCK_MS, createT1, parseToolCall } from './t1.js';
+import { ownerOf, subjectOf, tokenOf } from './identity.js';
 
 const PUBLIC = new URL('../public/', import.meta.url);
 // Only these files are served; no user-controlled path ever reaches the disk.
 const STATIC = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/widget.js': ['widget.js', 'text/javascript; charset=utf-8'],
+};
+// Dev only (TEST_TOKEN / TEST_CLI): puts a real test token and cli on the demo page's widget so a session can start.
+// Never set in production; the token is written into the page, so the page must stay on localhost.
+const attr = (v) => String(v).replace(/[^A-Za-z0-9._~+\/=-]/g, '');
+// With portalFlag, it also sets the sessionStorage flags the portal sets after its PIN check at login (the portal's
+// storage is on another origin, so the demo page cannot see it). The service still checks the phone against the session.
+const devPageHtml = (html, { token, cli, portalFlag }) => {
+  const sub = subjectOf(token);
+  const flag = portalFlag && sub ? `<script>try{sessionStorage.setItem('isBalancePinVerified','1');sessionStorage.setItem('isBalancePinVerified:tel',${JSON.stringify(sub)})}catch{}</script>` : '';
+  return html.replace('token="demo-token"', `token="${attr(token)}" cli="${attr(cli)}"`).replace('<script src="/widget.js">', `${flag}<script src="/widget.js">`);
 };
 const MAX_BODY = 16 * 1024;
 
@@ -37,13 +50,10 @@ function send(res, event, data) {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-// Pseudonymous user id for the audit log. Until the gateway client id is fixed
-// per conversation (T1 tickets), it is a one-way digest of the bearer token;
-// the token itself is never stored or logged.
-function pseudonym(req) {
-  const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1] ?? 'anonymous';
-  return createHash('sha256').update(token).digest('hex').slice(0, 12);
-}
+// Pseudonymous user id for the audit log and rate limits: a one-way digest of
+// the token's subject (or of the token itself when it has none). The token
+// itself is never stored or logged.
+const pseudonym = (req) => ownerOf(tokenOf(req));
 
 const MAX_GUIDES = 3;
 const NO_VERIFIED_STEPS = {
@@ -63,11 +73,18 @@ async function collect(stream) {
 
 // Router mode: the model sees a short index of the guides this customer may
 // use and returns the ids it needs. Anything not in the index is dropped.
-async function routeGuides({ model, language, available, guides, history }) {
+async function routeGuides({ model, language, available, guides, history, tools }) {
   const index = available.map((g) => ({ id: g.id, title: g[language].title }));
   if (guides.unsupported) index.push({ id: UNSUPPORTED_ID, title: 'Things the portal does not offer' });
-  const raw = await collect(model.chat({ purpose: 'route', messages: routerMessages(index, history), language }));
+  const raw = await collect(model.chat({ purpose: 'route', messages: routerMessages(index, history, { tools }), language }));
   const routed = parseRefusal(raw);
+  // The model's own tool tag (with its arguments) wins. A plain own-data question (balance, recent transactions,
+  // fees and limits) is otherwise decided by rules, even over a model refusal: the model has seen earlier replies
+  // that mention a PIN and can wrongly refuse it as a PIN request. The rules are narrow (short, own data, no
+  // failure story) and the tools only read the customer's own data.
+  const modelTool = !routed.category && tools ? parseToolCall(raw) : null;
+  const tool = modelTool ?? intentTool(history.at(-1)?.content);
+  if (tool) return { picks: [], refusal: null, tool, toolSource: modelTool ? 'model' : 'rules' };
   if (routed.category) return { picks: [], refusal: routed.category };
   let picks = [];
   try { picks = JSON.parse(/\[[\s\S]*?\]/.exec(raw)?.[0] ?? '[]'); } catch { /* unparseable means no guide */ }
@@ -75,16 +92,17 @@ async function routeGuides({ model, language, available, guides, history }) {
   return { picks: [...new Set(picks)].filter((id) => allowed.has(id)).slice(0, MAX_GUIDES), refusal: null };
 }
 
-export function createService({ model, clock, audit, guides, scamCues, entitlements, failedQuestions, outputAllowlist, limits }) {
+export function createService({ devPage, model, gateway, clock, audit, guides, scamCues, entitlements, failedQuestions, outputAllowlist, limits }) {
+  const t1 = gateway ? createT1({ gateway, clock }) : null;
   const limiter = createLimiter({ clock, limits });
   const checkOutput = createOutputFilter({ allowlist: outputAllowlist, protectedTexts: PROTECTED_TEXTS });
   const conversations = new Map();
 
   // Fail closed: if entitlements cannot be read, offer only guides that need
   // no package, no primary connect and fit the individual role.
-  async function entitlementsFor(req, tenant) {
-    if (!entitlements) return null;
-    const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1];
+  async function entitlementsFor(req, tenant, conversation) {
+    if (!entitlements) return conversation?.session?.entitlements ?? null;
+    const token = tokenOf(req);
     try { return await entitlements({ token, tenant }); } catch { return { packages: [], primaryConnect: false, audience: 'individual' }; }
   }
 
@@ -113,6 +131,84 @@ export function createService({ model, clock, audit, guides, scamCues, entitleme
     res.end();
   }
 
+  // Session start. The widget sends the customer's cli once; the service
+  // verifies it with the backend under the customer's own token and fixes the
+  // ids for the conversation. Chat requests then carry only the token and the id.
+  async function handleSession(req, res) {
+    const reply = (status, payload) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(payload));
+    let body;
+    try { body = await readJson(req); } catch { reply(400, { error: 'bad_request' }); return; }
+    if (!t1) { reply(404, { error: 'not_available' }); return; }
+    const owner = pseudonym(req);
+    const known = typeof body?.conversationId === 'string' ? conversations.get(body.conversationId) : undefined;
+    const record = (outcome, extra = {}) => audit.append({
+      time: new Date(clock.now()).toISOString(), user: owner, tenant: typeof body?.tenant === 'string' ? body.tenant.slice(0, 40) : null,
+      conversationId: known ? body.conversationId : null, userText: '', replyText: '', outcome, ...extra,
+    });
+    if (known && known.owner !== owner) { await record('conversation_denied'); reply(404, { error: 'not_found' }); return; }
+    const started = await t1.start({ tenant: body?.tenant, token: tokenOf(req), cli: body?.cli });
+    if (!started.session) {
+      await record(started.code, started.reason ? { reason: started.reason } : {});
+      reply({ session_expired: 401, session_refused: 403, unavailable: 502 }[started.code], { error: started.code });
+      return;
+    }
+    // Package data is supplied by the widget (no backend endpoint returns it to a customer): demo only.
+    // primaryConnect is not: it comes from the backend's own row for this wallet.
+    const g = body?.gating ?? {};
+    // The login response keeps the package under `pack` (`package` is accepted as a fallback).
+    const codes = g.pack?.natureCodes ?? g.package?.natureCodes ?? g.natureCodes;
+    const entitlementsFromWidget = {
+      // packages gate only when usePackages is true; then a missing list locks everything
+      packages: g.usePackages === true ? (Array.isArray(codes) ? codes.filter((c) => typeof c === 'string') : []) : null,
+      primaryConnect: started.session.primaryConnect,
+      audience: g.audience === 'merchant' ? 'merchant' : 'individual',
+    };
+    const session = Object.freeze({ ...started.session, entitlements: Object.freeze(entitlementsFromWidget) });
+    const conversationId = known ? body.conversationId : randomUUID();
+    const conversation = known ?? { owner, history: [], language: 'en', asked: new Set(), session: null };
+    conversation.session = session;
+    conversation.unlock = null; // a new session starts with the balance locked
+    conversations.set(conversationId, conversation);
+    await audit.append({
+      time: new Date(clock.now()).toISOString(), user: owner, tenant: session.tenant, conversationId,
+      userText: '', replyText: '', outcome: 'session_started',
+    });
+    reply(200, { conversationId });
+  }
+
+  // Balance unlock (ticket 24). Either the portal's PIN-verified flag (a client claim) or the widget's own
+  // PIN box (a SHA-512 hash, forwarded to the PIN check and never kept). Unlocks last 5 minutes.
+  async function handleUnlock(req, res) {
+    const reply = (status, payload) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(payload));
+    let body;
+    try { body = await readJson(req); } catch { reply(400, { error: 'bad_request' }); return; }
+    if (!t1) { reply(404, { error: 'not_available' }); return; }
+    const owner = pseudonym(req);
+    const conversation = typeof body?.conversationId === 'string' ? conversations.get(body.conversationId) : undefined;
+    const record = (outcome) => audit.append({
+      time: new Date(clock.now()).toISOString(), user: owner, tenant: conversation?.session?.tenant ?? null,
+      conversationId: conversation && conversation.owner === owner ? body.conversationId : null, userText: '', replyText: '', outcome,
+    });
+    if (!conversation || conversation.owner !== owner) {
+      if (conversation) await record('conversation_denied');
+      reply(404, { error: 'not_found' });
+      return;
+    }
+    if (!conversation.session) { reply(401, { error: 'session_expired' }); return; }
+    const granted = { unlocked: true, expiresInSeconds: UNLOCK_MS / 1000 };
+    if ('pinHash' in body) {
+      const result = await t1.unlockWithPin(conversation, tokenOf(req), body.pinHash);
+      if (result.ok) { await record('balance_unlocked_pin'); reply(200, granted); return; }
+      await record(`unlock_${result.error}`);
+      const status = { bad_request: 400, pin_wrong: 403, pin_blocked: 423, session_expired: 401, unavailable: 502 }[result.error];
+      reply(status, { error: result.error, ...(result.attemptsLeft !== undefined ? { attemptsLeft: result.attemptsLeft } : {}) });
+      return;
+    }
+    if (t1.unlockWithPortalFlag(conversation, body.portalFlag)) { await record('balance_unlocked_flag'); reply(200, granted); return; }
+    await record('unlock_flag_not_valid');
+    reply(403, { error: 'flag_not_valid' });
+  }
+
   async function handleChat(req, res) {
     let body;
     try { body = await readJson(req); } catch { res.writeHead(400).end(); return; }
@@ -121,8 +217,20 @@ export function createService({ model, clock, audit, guides, scamCues, entitleme
     // Everything past this point sees only the redacted text; the raw message is never stored.
     const shielded = shield(body.message);
     const message = shielded.text;
-    const conversationId = body.conversationId ?? randomUUID();
-    const conversation = conversations.get(conversationId) ?? { history: [], language: 'en', asked: new Set() };
+    // A conversation belongs to the customer who started it. An id the service
+    // did not issue is ignored; someone else's id is refused without saying it exists.
+    const owner = pseudonym(req);
+    const known = typeof body.conversationId === 'string' ? conversations.get(body.conversationId) : undefined;
+    if (known && known.owner !== owner) {
+      await audit.append({
+        time: new Date(clock.now()).toISOString(), user: owner, tenant: body.tenant ?? null, conversationId: body.conversationId,
+        userText: '', replyText: '', outcome: 'conversation_denied',
+      });
+      res.writeHead(404).end();
+      return;
+    }
+    const conversationId = known ? body.conversationId : randomUUID();
+    const conversation = known ?? { owner, history: [], language: 'en', asked: new Set(), session: null };
     const language = detectLanguage(body.message, conversation.language);
     const limit = limiter.admit(pseudonym(req), body.message.length);
     if (limit) {
@@ -153,6 +261,7 @@ export function createService({ model, clock, audit, guides, scamCues, entitleme
     let refusal = null;
     let filtered = null;
     let limited = null;
+    let toolAudit = null;
     // The model's text is held back until it has been read in full: the refusal
     // tag comes off the front before anything reaches the customer.
     const answer = async (messages) => {
@@ -177,26 +286,51 @@ export function createService({ model, clock, audit, guides, scamCues, entitleme
     };
     try {
       if (guides) {
-        const available = guides.availableFor(await entitlementsFor(req, body.tenant));
-        const routed = await routeGuides({ model: turnModel, language, available, guides, history });
+        const ent = await entitlementsFor(req, body.tenant, conversation);
+        const available = guides.availableFor(ent);
+        const routed = await routeGuides({ model: turnModel, language, available, guides, history, tools: t1 ? TOOL_RULES : '' });
         const { picks } = routed;
         refusal = routed.refusal;
-        const used = picks.filter((id) => id !== UNSUPPORTED_ID).map((id) => guides.get(id));
-        guideIds = used.map((g) => g.id);
-        send(res, 'guides', { guides: used.map((g) => ({ id: g.id, title: g[language].title })) });
-        if (picks.length === 0 && !refusal) {
-          chipReasons.push('no_guide_hit');
-          reply += NO_VERIFIED_STEPS[language];
-          send(res, 'delta', { text: NO_VERIFIED_STEPS[language] });
-          await failedQuestions?.append({ time: new Date(clock.now()).toISOString(), conversationId, tenant: body.tenant ?? null, language, question: message });
-        } else {
-          const material = picks.map((id) => guides.get(id)?.[language] ?? null).filter(Boolean);
-          await answer(answerMessages(material, picks.includes(UNSUPPORTED_ID) ? guides.unsupported : '', history));
-          const closing = used.find((g) => g[language].closing)?.[language].closing;
-          if (!refusal && !filtered) {
-            const text = closing ? `\n\n${closing.heading}${language === 'fr' ? ' :' : ':'} ${closing.body}` : `\n\n${GENERIC_CLOSING[language]}`;
+        if (routed.tool) {
+          // Without a gateway there is no session to read from: the customer is told to sign in, never that no guide matched.
+          const done = t1 ? await t1.run({ call: routed.tool, conversation, token: tokenOf(req), entitlements: ent }) : { kind: 'fixed', code: 'session_expired', name: routed.tool.name };
+          if (done.kind === 'data') {
+            const masked = JSON.stringify(done.result);
+            toolAudit = { name: done.name, outcome: 'ok', data: masked, source: routed.toolSource };
+            send(res, 'tool', { name: done.name, result: done.result });
+            await answer(dataMessages(masked, history));
+            if (done.notice && !filtered) {
+              const text = `\n\n${T1_MESSAGES[done.notice][language]}`;
+              reply += text;
+              send(res, 'delta', { text });
+            }
+          } else {
+            const text = T1_MESSAGES[done.code][language];
+            toolAudit = { name: done.name, outcome: done.code, source: routed.toolSource, ...(done.reason ? { reason: done.reason } : {}) };
+            outcome = done.code === 'rejected' ? 'tool_rejected' : done.code;
             reply += text;
+            send(res, 'tool_blocked', { code: done.code, text });
             send(res, 'delta', { text });
+            if (!['session_expired', 'pin_required'].includes(done.code)) chipReasons.push(`tool_${done.code}`);
+          }
+        } else {
+          const used = picks.filter((id) => id !== UNSUPPORTED_ID).map((id) => guides.get(id));
+          guideIds = used.map((g) => g.id);
+          send(res, 'guides', { guides: used.map((g) => ({ id: g.id, title: g[language].title })) });
+          if (picks.length === 0 && !refusal) {
+            chipReasons.push('no_guide_hit');
+            reply += NO_VERIFIED_STEPS[language];
+            send(res, 'delta', { text: NO_VERIFIED_STEPS[language] });
+            await failedQuestions?.append({ time: new Date(clock.now()).toISOString(), conversationId, tenant: body.tenant ?? null, language, question: message });
+          } else {
+            const material = picks.map((id) => guides.get(id)?.[language] ?? null).filter(Boolean);
+            await answer(answerMessages(material, picks.includes(UNSUPPORTED_ID) ? guides.unsupported : '', history));
+            const closing = used.find((g) => g[language].closing)?.[language].closing;
+            if (!refusal && !filtered) {
+              const text = closing ? `\n\n${closing.heading}${language === 'fr' ? ' :' : ':'} ${closing.body}` : `\n\n${GENERIC_CLOSING[language]}`;
+              reply += text;
+              send(res, 'delta', { text });
+            }
           }
         }
       } else {
@@ -235,6 +369,7 @@ export function createService({ model, clock, audit, guides, scamCues, entitleme
       ...(filtered ? { filter: filtered } : {}),
       ...(refusal ? { refusalCategory: refusal } : {}),
       ...(scam.length ? { scamCues: scam } : {}),
+      ...(toolAudit ? { tool: toolAudit.name, toolOutcome: toolAudit.outcome, toolSource: toolAudit.source, ...(toolAudit.reason ? { toolReason: toolAudit.reason } : {}), ...(toolAudit.data ? { toolData: toolAudit.data } : {}) } : {}),
     });
     res.end();
   }
@@ -244,10 +379,18 @@ export function createService({ model, clock, audit, guides, scamCues, entitleme
       handleChat(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end(); });
       return;
     }
+    if (req.method === 'POST' && req.url === '/unlock') {
+      handleUnlock(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end(); });
+      return;
+    }
+    if (req.method === 'POST' && req.url === '/session') {
+      handleSession(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end(); });
+      return;
+    }
     const file = req.method === 'GET' ? STATIC[req.url] : undefined;
     if (file) {
       readFile(new URL(file[0], PUBLIC)).then(
-        (data) => res.writeHead(200, { 'content-type': file[1] }).end(data),
+        (data) => res.writeHead(200, { 'content-type': file[1] }).end(file[0] === 'index.html' && devPage ? devPageHtml(data.toString(), devPage) : data),
         () => res.writeHead(500).end(),
       );
       return;

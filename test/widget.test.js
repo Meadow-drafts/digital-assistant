@@ -165,3 +165,32 @@ test('the chip works before any message and reports no conversation yet', async 
   assert.equal(heard.length, 1);
   assert.equal(heard[0].conversationId, null);
 });
+
+test('with a cli from the host, the widget starts a session once with the token, then chats with only the token and the session id', async (t) => {
+  const { createFakeGateway } = await import('./harness/fake-gateway.js');
+  const { bankRoutes, customer } = await import('./harness/bank-fixtures.js');
+  const a = customer({ sub: '237690000111', cli: 'CLI-A', accountNo: '12345678901', phone: '237690000111' });
+  const svc = await startService({ gateway: createFakeGateway(bankRoutes([a])) });
+  t.after(svc.close);
+  const w = await openWidget(svc.baseUrl);
+  const widget = w.document.querySelector('bank-assistant');
+  widget.setAttribute('token', a.token);
+  widget.setAttribute('cli', 'CLI-A');
+  widget.setAttribute('gating', JSON.stringify({ usePackages: false, primaryConnect: true }));
+  widget.setAttribute('tenant', 'demo');
+  const sent = [];
+  const realFetch = w.dom.window.fetch;
+  w.dom.window.fetch = (url, init) => { sent.push({ url: String(url), body: JSON.parse(init.body) }); return realFetch(url, init); };
+
+  await w.send('hello');
+  await w.until(() => w.qa('message').length >= 2 && w.q('thinking').hidden);
+  await w.send('and again');
+  await w.until(() => sent.length >= 3);
+
+  assert.deepEqual(sent.map((s) => s.url.replace(/^.*\//, '')), ['session', 'chat', 'chat']);
+  assert.equal(sent[0].body.cli, 'CLI-A');
+  assert.equal(sent[1].body.cli, undefined, 'chat carries no cli');
+  assert.equal(sent[1].body.conversationId, sent[2].body.conversationId);
+  assert.ok(sent[1].body.conversationId);
+  assert.equal(svc.gateway.calls.filter((c) => c.path.endsWith('clientInfo')).length, 1);
+});

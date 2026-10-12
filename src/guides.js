@@ -66,11 +66,12 @@ class GuideSet extends Map {
   }
 
   // Guides this customer may be told about. `entitlements` is
-  // { packages, primaryConnect, audience }; null means unrestricted.
+  // { packages, primaryConnect, audience }; null means unrestricted, and a
+  // null `packages` means the customer's tenant does not use packages.
   availableFor(entitlements) {
     return [...this.values()].filter((g) => {
       if (!entitlements) return true;
-      if (g.packages && !g.packages.some((p) => entitlements.packages.includes(p))) return false;
+      if (g.packages && entitlements.packages && !g.packages.some((p) => entitlements.packages.includes(p))) return false;
       if (g.primaryOnly && !entitlements.primaryConnect) return false;
       return g.roles.has(entitlements.audience);
     });

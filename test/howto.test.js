@@ -56,7 +56,7 @@ test('a question no guide covers gets the no-verified-steps reply and a failed-q
   t.after(svc.close);
 
   const en = await chatTurn(svc.baseUrl, { message: 'How do I trade stocks here?', tenant: 'demo' }, { token: 'SECRET-TOKEN-123' });
-  const fr = await chatTurn(svc.baseUrl, { message: 'Comment acheter des actions ici ?', tenant: 'demo', conversationId: en.events.at(-1).conversationId });
+  const fr = await chatTurn(svc.baseUrl, { message: 'Comment acheter des actions ici ?', tenant: 'demo', conversationId: en.events.at(-1).conversationId }, { token: 'SECRET-TOKEN-123' });
 
   assert.match(replyOf(en.events), /no verified steps/i);
   assert.match(replyOf(fr.events), /pas d'étapes vérifiées/i);

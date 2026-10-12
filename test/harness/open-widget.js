@@ -10,6 +10,8 @@ export async function openWidget(baseUrl) {
     beforeParse(window) {
       window.fetch = (url, init) => fetch(new URL(url, baseUrl), init);
       window.TextDecoder = TextDecoder;
+      window.TextEncoder = TextEncoder;
+      Object.defineProperty(window, 'crypto', { value: globalThis.crypto, configurable: true });
     },
   });
   const { document } = dom.window;

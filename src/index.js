@@ -4,6 +4,7 @@ import { createModel, loadModelConfig } from './model.js';
 import { loadGuides } from './guides.js';
 import { loadLimits } from './limits.js';
 import { loadScamCues } from './scam.js';
+import { createHttpGateway, loadTenants } from './gateway.js';
 
 // Demo entry point. With MODEL_PRIMARY_* set in the environment (see
 // loadModelConfig) the real OpenAI-compatible chain is used; otherwise a
@@ -32,6 +33,11 @@ const port = Number(process.env.PORT ?? 3000);
 
 const modelConfig = loadModelConfig(process.env);
 const scamCues = loadScamCues(process.env.SCAM_CUES ?? new URL('../config/scam-cues.json', import.meta.url));
-createService({ model: modelConfig ? createModel(modelConfig) : scriptedModel, clock, audit, guides, scamCues, failedQuestions, outputAllowlist, limits: loadLimits(process.env) }).listen(port, () => {
+// Gateway base URLs come only from this tenant-id allowlist (demo entry: the bank's test server).
+const gateway = createHttpGateway({ tenants: loadTenants(process.env.GATEWAY_TENANTS ?? new URL('../config/tenants.json', import.meta.url)) });
+// Dev only: TEST_TOKEN and TEST_CLI (a test customer's bearer token and cli) go on the demo page so a session can start.
+const devPage = process.env.TEST_TOKEN && process.env.TEST_CLI ? { token: process.env.TEST_TOKEN, cli: process.env.TEST_CLI, portalFlag: process.env.TEST_PORTAL_FLAG === '1' } : undefined;
+if (devPage) console.warn('TEST_TOKEN/TEST_CLI set: the demo page carries a real token. Local use only.');
+createService({ devPage, model: modelConfig ? createModel(modelConfig) : scriptedModel, gateway, clock, audit, guides, scamCues, failedQuestions, outputAllowlist, limits: loadLimits(process.env) }).listen(port, () => {
   console.log(`assistant demo host: http://localhost:${port}/`);
 });
