@@ -1,7 +1,7 @@
 // In-house support console. Plain page, no framework. Every value from the service is set as text.
 // The agent logs in with the demo config login; the session token lives in this page (and sessionStorage).
 const $ = (role) => document.querySelector(`[data-role="${role}"]`);
-const STATE = { waiting: 'Waiting for an agent', with_agent: 'With an agent', resolved: 'Resolved' };
+const STATE = { waiting: 'Waiting for an agent', with_agent: 'With an agent', resolved: 'Resolved', emailed: 'Emailed to support (no chat)' };
 
 let token = null;
 let me = null;

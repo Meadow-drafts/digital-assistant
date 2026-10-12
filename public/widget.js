@@ -11,6 +11,9 @@
 // Handoff: only a click on the human chip asks the service for a case (the host also hears
 // bank-assistant:handoff-request). The widget then shows the case banner and polls the service every poll-ms
 // (attribute, default 2000) for the case state and the agent's messages.
+// Disputed transactions (a dispute, a wrong transfer, a reversal, a debit without credit): the chip click opens a
+// draft message for the customer to edit and review instead. Nothing is sent, and no case is opened, until the
+// customer confirms the exact content on the confirm screen.
 const TEXT = {
   en: {
     title: 'Assistant',
@@ -47,6 +50,24 @@ const TEXT = {
     no: 'No',
     thanks: 'Thank you for your feedback.',
     handoffError: 'We could not reach support right now. Please try again.',
+    draftTitle: 'Review your message before it goes anywhere',
+    draftHint: 'I wrote this from what you told me and your transaction record. Change anything you like. The transaction details below are masked and cannot be edited.',
+    destChat: 'Live chat with an agent',
+    destEmail: 'Email to the support team',
+    destBoth: 'Both',
+    review: 'Review what will be sent',
+    skip: 'Open the chat without a message',
+    discard: 'Discard',
+    confirmNote: 'This is exactly what will be sent. Nothing has been sent yet.',
+    previewChat: 'Message for the live chat',
+    previewEmail: 'Email to the support team',
+    to: 'To',
+    subject: 'Subject',
+    confirmSend: 'Confirm and send',
+    back: 'Back and edit',
+    draftError: 'We could not prepare your message. Please try again.',
+    sendError: 'Nothing was sent. Please try again.',
+    caseChanged: 'Your case changed in the meantime. Nothing was sent: please review your message again.',
   },
   fr: {
     title: 'Assistant',
@@ -83,6 +104,24 @@ const TEXT = {
     no: 'Non',
     thanks: 'Merci pour votre retour.',
     handoffError: "Nous n'avons pas pu joindre le support pour le moment. Veuillez réessayer.",
+    draftTitle: 'Relisez votre message avant tout envoi',
+    draftHint: "Je l'ai rédigé à partir de ce que vous m'avez dit et de votre opération. Modifiez ce que vous voulez. Les détails de l'opération ci-dessous sont masqués et non modifiables.",
+    destChat: 'Chat en direct avec un agent',
+    destEmail: "E-mail à l'équipe d'assistance",
+    destBoth: 'Les deux',
+    review: 'Vérifier ce qui sera envoyé',
+    skip: 'Ouvrir le chat sans message',
+    discard: 'Abandonner',
+    confirmNote: "Voici exactement ce qui sera envoyé. Rien n'a encore été envoyé.",
+    previewChat: 'Message pour le chat en direct',
+    previewEmail: "E-mail à l'équipe d'assistance",
+    to: 'À',
+    subject: 'Objet',
+    confirmSend: 'Confirmer et envoyer',
+    back: 'Retour pour modifier',
+    draftError: "Nous n'avons pas pu préparer votre message. Veuillez réessayer.",
+    sendError: "Rien n'a été envoyé. Veuillez réessayer.",
+    caseChanged: "Votre dossier a changé entre-temps. Rien n'a été envoyé : relisez votre message.",
   },
 };
 
@@ -90,6 +129,9 @@ const PLAIN_PATH = /^\/(?!\/)[A-Za-z0-9\-/]*$/;
 const PLAIN_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
 // Never filled, whatever a card says: PIN, OTP, password, voucher and code inputs (by name, id or type).
 const SECRET = /pin|otp|pass|voucher|code|cvv|token|secret|mdp/i;
+// Chip reasons for a disputed transaction (a dispute, a wrong transfer, a reversal, a debit with no credit): the chip
+// click starts a drafted message. Fraud cues and plain "contact the bank" endings keep opening the handoff directly.
+const DISPUTE_REASONS = ['dispute', 'wrong_transfer', 'reversal', 'debit_without_credit', 'reversal_in_progress'];
 const RESUME_KEY = 'bank-assistant:prefill';
 const RESUME_MS = 60_000;
 const text = (v, max) => (typeof v === 'string' && v.length <= max ? v : null);
@@ -125,6 +167,39 @@ class BankAssistant extends HTMLElement {
           <button data-role="pin-submit" type="submit"></button>
           <p data-role="pin-note" aria-live="polite"></p>
         </form>
+        <section data-role="draft-panel" hidden>
+          <h3 data-role="draft-title"></h3>
+          <div data-role="draft-edit">
+            <p data-role="draft-hint"></p>
+            <textarea data-role="draft-text" rows="8" maxlength="2000"></textarea>
+            <ul data-role="draft-details"></ul>
+            <fieldset data-role="draft-destinations">
+              <label><input type="radio" name="ba-destination" value="chat" data-role="dest-chat" checked /> <span data-role="dest-chat-label"></span></label>
+              <label><input type="radio" name="ba-destination" value="email" data-role="dest-email" /> <span data-role="dest-email-label"></span></label>
+              <label><input type="radio" name="ba-destination" value="both" data-role="dest-both" /> <span data-role="dest-both-label"></span></label>
+            </fieldset>
+            <button data-role="draft-review" type="button"></button>
+            <button data-role="draft-skip" type="button"></button>
+            <button data-role="draft-discard" type="button"></button>
+          </div>
+          <div data-role="draft-confirm-screen" hidden>
+            <p data-role="draft-confirm-note"></p>
+            <div data-role="preview-chat-box">
+              <strong data-role="preview-chat-title"></strong>
+              <pre data-role="preview-chat"></pre>
+            </div>
+            <div data-role="preview-email-box">
+              <strong data-role="preview-email-title"></strong>
+              <p><span data-role="preview-to-label"></span>: <span data-role="preview-email-to"></span></p>
+              <p><span data-role="preview-subject-label"></span>: <span data-role="preview-email-subject"></span></p>
+              <pre data-role="preview-email-body"></pre>
+            </div>
+            <p data-role="draft-warning" hidden></p>
+            <button data-role="draft-send" type="button"></button>
+            <button data-role="draft-back" type="button"></button>
+          </div>
+          <p data-role="draft-error" aria-live="polite"></p>
+        </section>
         <button data-role="human-chip" type="button" data-prominent="false"></button>
         <form data-role="form">
           <input data-role="input" type="text" maxlength="1000" autocomplete="off" />
@@ -138,8 +213,15 @@ class BankAssistant extends HTMLElement {
     // Only this click opens a handoff: the host hears about it, then the service is asked for a case.
     this.q('human-chip').addEventListener('click', () => {
       this.dispatchEvent(new CustomEvent('bank-assistant:handoff-request', { bubbles: true, detail: { conversationId: this.conversationId } }));
-      this.startHandoff();
+      // A dispute-like situation starts with a drafted message to review; anything else opens the handoff as before.
+      if (this.disputeLike && this.conversationId) this.openDraft();
+      else this.startHandoff();
     });
+    this.q('draft-review').addEventListener('click', () => this.reviewDraft());
+    this.q('draft-send').addEventListener('click', () => this.sendDraft());
+    this.q('draft-back').addEventListener('click', () => this.showDraftStep('edit'));
+    this.q('draft-discard').addEventListener('click', () => this.closeDraft());
+    this.q('draft-skip').addEventListener('click', () => { this.closeDraft(); this.startHandoff(); });
     this.q('solved-yes').addEventListener('click', () => this.answerSolved(true));
     this.q('solved-no').addEventListener('click', () => this.answerSolved(false));
     this.render();
@@ -161,6 +243,7 @@ class BankAssistant extends HTMLElement {
     this.q('solved-text').textContent = t.solvedQ;
     this.q('solved-yes').textContent = t.yes;
     this.q('solved-no').textContent = t.no;
+    this.renderDraftText();
     this.renderCase();
   }
 
@@ -228,6 +311,99 @@ class BankAssistant extends HTMLElement {
       this.cursor = 0;
       this.applyCase(res.body);
     } catch { this.addNote(TEXT[this.lang].handoffError); } finally { this.handoffBusy = false; }
+  }
+
+  // ---- drafted case message: edit, review the exact content, confirm ----
+
+  renderDraftText() {
+    const t = TEXT[this.lang];
+    const set = (role, value) => { this.q(role).textContent = value; };
+    set('draft-title', t.draftTitle);
+    set('draft-hint', t.draftHint);
+    set('dest-chat-label', t.destChat);
+    set('dest-email-label', t.destEmail);
+    set('dest-both-label', t.destBoth);
+    set('draft-review', t.review);
+    set('draft-skip', t.skip);
+    set('draft-discard', t.discard);
+    set('draft-confirm-note', t.confirmNote);
+    set('preview-chat-title', t.previewChat);
+    set('preview-email-title', t.previewEmail);
+    set('preview-to-label', t.to);
+    set('preview-subject-label', t.subject);
+    set('draft-send', t.confirmSend);
+    set('draft-back', t.back);
+  }
+
+  showDraftStep(step) {
+    this.q('draft-edit').hidden = step !== 'edit';
+    this.q('draft-confirm-screen').hidden = step !== 'confirm';
+    this.q('draft-error').textContent = '';
+  }
+
+  closeDraft() {
+    this.draft = null;
+    this.q('draft-panel').hidden = true;
+  }
+
+  // The service drafts from the customer's own words and the masked transaction record. Nothing is sent or opened.
+  async openDraft() {
+    if (this.draftBusy) return;
+    this.draftBusy = true;
+    try {
+      const res = await this.caseCall('POST', '/draft', { conversationId: this.conversationId, tenant: this.getAttribute('tenant') });
+      if (!res.ok) { this.addNote(TEXT[this.lang].draftError); return; }
+      this.draft = { id: res.body.draftId, token: null };
+      this.q('draft-text').value = res.body.text;
+      this.q('draft-details').replaceChildren(...res.body.details.map((d) => {
+        const li = document.createElement('li');
+        li.textContent = `${d.label}: ${d.value}`;
+        return li;
+      }));
+      this.q('dest-chat').checked = true;
+      this.q('draft-panel').hidden = false;
+      this.showDraftStep('edit');
+    } catch { this.addNote(TEXT[this.lang].draftError); } finally { this.draftBusy = false; }
+  }
+
+  // What the customer is about to confirm is what the service returns here, never something the widget composes.
+  async reviewDraft() {
+    if (!this.draft || this.draftBusy) return;
+    this.draftBusy = true;
+    const destination = this.querySelector('input[name="ba-destination"]:checked')?.value ?? 'chat';
+    try {
+      const res = await this.caseCall('POST', '/draft/preview', { conversationId: this.conversationId, draftId: this.draft.id, text: this.q('draft-text').value, destination });
+      if (!res.ok) { this.q('draft-error').textContent = TEXT[this.lang].draftError; return; }
+      const p = res.body;
+      this.draft.token = p.previewToken;
+      this.q('preview-chat-box').hidden = !p.chat;
+      this.q('preview-chat').textContent = p.chat?.text ?? '';
+      this.q('preview-email-box').hidden = !p.email;
+      this.q('preview-email-to').textContent = p.email?.to ?? '';
+      this.q('preview-email-subject').textContent = p.email?.subject ?? '';
+      this.q('preview-email-body').textContent = p.email?.body ?? '';
+      this.q('draft-warning').hidden = !p.warning;
+      this.q('draft-warning').textContent = p.warning?.text ?? '';
+      this.showDraftStep('confirm');
+    } catch { this.q('draft-error').textContent = TEXT[this.lang].draftError; } finally { this.draftBusy = false; }
+  }
+
+  async sendDraft() {
+    if (!this.draft?.token || this.draftBusy) return;
+    this.draftBusy = true;
+    const t = TEXT[this.lang];
+    try {
+      const res = await this.caseCall('POST', '/draft/confirm', { conversationId: this.conversationId, draftId: this.draft.id, previewToken: this.draft.token });
+      if (!res.ok) {
+        this.q('draft-error').textContent = res.body.error === 'case_changed' ? t.caseChanged : t.sendError;
+        if (res.body.error === 'case_changed') { this.draftBusy = false; this.closeDraft(); await this.openDraft(); this.q('draft-error').textContent = t.caseChanged; }
+        return;
+      }
+      this.closeDraft();
+      this.addNote(res.body.confirmation);
+      // A chat draft has opened (or joined) the handoff; an email-only message leaves the customer with the assistant.
+      if (res.body.destination !== 'email') { this.cursor = 0; this.applyCase(res.body); }
+    } catch { this.q('draft-error').textContent = t.sendError; } finally { this.draftBusy = false; }
   }
 
   async cancelHandoff() {
@@ -612,6 +788,7 @@ class BankAssistant extends HTMLElement {
         } else if (ev.type === 'chip') {
           // Prominence is sticky for the conversation: a calm turn never hides a raised chip.
           if (ev.prominent) this.q('human-chip').dataset.prominent = 'true';
+          if (ev.reasons?.some((r) => DISPUTE_REASONS.includes(r))) this.disputeLike = true;
         } else if (ev.type === 'tool_blocked') {
           if (ev.code === 'session_expired') this.sessionStarted = false;
           if (ev.code === 'pin_required') pinNeeded = true;

@@ -122,6 +122,21 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
     }, 'agent_emailed');
   }
 
+  // Opens a waiting case. `opening` is a confirmed draft: the first message of the case, ahead of the replayed chat.
+  async function startCase({ conversationId, conversation, owner, tenant, ref, opening }) {
+    const c = store.open({ conversationId, owner, tenant, language: conversation.language, ref });
+    if (opening) add(c, 'customer', opening);
+    // The agent starts with the conversation so far, not a blank page.
+    for (const m of conversation.history) add(c, m.role === 'user' ? 'customer' : 'bot', m.content);
+    add(c, 'system', 'Case opened by the customer.');
+    c.customerEmail = conversation.session?.email ?? null;
+    customerSeen(c);
+    await record(c, 'handoff_opened');
+    if (hours.isOpen(clock.now())) await startPaging(c);
+    else await queueUntilOpen(c, conversation);
+    return c;
+  }
+
   async function openHandoff(req, res) {
     let body;
     try { body = await readJson(req); } catch { json(res, 400, { error: 'bad_request' }); return; }
@@ -134,15 +149,7 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
     conversations.set(conversationId, conversation);
     const open = store.latestFor(conversationId);
     if (open && (open.state === 'waiting' || open.state === 'with_agent')) { json(res, 200, { conversationId, ...view(open) }); return; }
-    const c = store.open({ conversationId, owner, tenant: typeof body?.tenant === 'string' ? body.tenant.slice(0, 40) : null, language: conversation.language });
-    // The agent starts with the conversation so far, not a blank page.
-    for (const m of conversation.history) add(c, m.role === 'user' ? 'customer' : 'bot', m.content);
-    add(c, 'system', 'Case opened by the customer.');
-    c.customerEmail = conversation.session?.email ?? null;
-    customerSeen(c);
-    await record(c, 'handoff_opened');
-    if (hours.isOpen(clock.now())) await startPaging(c);
-    else await queueUntilOpen(c, conversation);
+    const c = await startCase({ conversationId, conversation, owner, tenant: typeof body?.tenant === 'string' ? body.tenant.slice(0, 40) : null });
     json(res, 200, { conversationId, ...view(c) });
   }
 
@@ -159,7 +166,7 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
     if (!ownConversation(req, res, id)) return;
     const c = store.latestFor(id);
     // A cancelled case is closed: the conversation is back with the bot.
-    if (!c || c.closeReason === 'cancelled_by_user') { json(res, 200, { state: 'bot', ref: null }); return; }
+    if (!c || c.closeReason === 'cancelled_by_user' || c.state === 'emailed') { json(res, 200, { state: 'bot', ref: null }); return; }
     customerSeen(c);
     const after = Number.parseInt(url.searchParams.get('after') ?? '0', 10) || 0;
     // The customer receives the agent's words; their own side is already on their screen.
@@ -296,6 +303,32 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
     return false;
   }
 
+  // For drafted case messages: a reference for the email subject, and the case the customer already has open.
+  handle.reserveRef = () => store.reserveRef();
+  // The customer emailed support without opening a chat. The reference leads to a recorded case that nobody is paged
+  // for (state 'emailed'); with a case already open, the email belongs to that case and nothing new is recorded.
+  handle.fileEmailedDraft = async ({ conversationId, conversation, tenant, ref, text }) => {
+    const open = handle.openCaseFor(conversationId);
+    if (open) return view(open);
+    const c = store.open({ conversationId, owner: conversation.owner, tenant, language: conversation.language, ref, state: 'emailed' });
+    add(c, 'customer', text);
+    await record(c, 'draft_emailed');
+    return { state: 'bot', ref };
+  };
+  // The customer confirmed a chat draft. With a case already open it joins that case; otherwise it opens one.
+  handle.sendChatDraft = async ({ conversationId, conversation, tenant, ref, text }) => {
+    const open = handle.openCaseFor(conversationId);
+    if (!open) return view(await startCase({ conversationId, conversation, owner: conversation.owner, tenant, ref, opening: text }));
+    add(open, 'customer', text);
+    if (open.state === 'with_agent') await mailAgentIfGone(open);
+    customerSeen(open);
+    await record(open, 'draft_added_to_case');
+    return view(open);
+  };
+  handle.openCaseFor = (conversationId) => {
+    const c = store.latestFor(conversationId);
+    return c && (c.state === 'waiting' || c.state === 'with_agent') ? c : null;
+  };
   // For the chat route: the case that currently has the customer's messages, if an agent has it.
   handle.agentCaseFor = (conversationId) => {
     const c = store.latestFor(conversationId);

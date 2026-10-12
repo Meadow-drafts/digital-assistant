@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 
 // Support configuration: the agent roster, who is on call, every timer, opening hours and how mail is sent.
 // Nothing here has a default in code; the bank edits config/support.json (placeholder values from ticket 07).
+const ADDRESS = /^[^\s<>,;"@]+@[^\s<>,;"@]+$/;
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const fail = (what) => { throw new Error(`support config: ${what}`); };
 const positive = (v) => Number.isFinite(v) && v > 0;
@@ -29,6 +30,7 @@ export function loadSupport(path) {
 
   const mail = raw.mail ?? {};
   if (!['log', 'smtp'].includes(mail.mode)) fail('mail.mode must be "log" or "smtp"');
+  if (typeof mail.supportAddress !== 'string' || !ADDRESS.test(mail.supportAddress)) fail('mail.supportAddress must be the support team\'s email address');
 
   return {
     agents: { list, onCall, sessionMs },

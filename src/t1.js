@@ -71,6 +71,12 @@ function statusDetail(r) {
 
 const involves = (r, wallet) => r?.codewaldo === wallet || r?.codewalop === wallet;
 
+// The table shows ntrans or nhis, not clientReferenceId, so any of the three finds a row.
+const withReference = (rows, reference) => {
+  const wanted = reference.toLowerCase();
+  return rows.find((r) => [r.clientReferenceId, r.ntrans, r.nhis].some((id) => String(id ?? '').toLowerCase() === wanted));
+};
+
 function maskTransaction(r, wallet) {
   const out = r.codewaldo === wallet;
   return {
@@ -263,8 +269,7 @@ export function createT1({ gateway, clock, etab = ETAB }) {
       // The table shows ntrans or nhis, not clientReferenceId, so any of the three finds it. Only the customer's own
       // list is searched: the by-reference endpoint can take 15 s or more and would answer differently for
       // someone else's reference than for an unknown one.
-      const wanted = reference.toLowerCase();
-      const found = (await ownRows(session, ctx)).find((r) => [r.clientReferenceId, r.ntrans, r.nhis].some((id) => String(id ?? '').toLowerCase() === wanted));
+      const found = withReference(await ownRows(session, ctx), reference);
       if (!found) return { found: false, reference, outcome: 'not_found' };
       const transaction = { ...maskTransaction(found, session.wallet), reference }; // the id the customer can see
       const detail = statusDetail(found);
@@ -349,5 +354,21 @@ export function createT1({ gateway, clock, etab = ETAB }) {
     try { return await ownRows(session, { tenant: session.tenant, token }); } catch { return null; }
   }
 
-  return { run, start, ownHistory, unlockWithPortalFlag, unlockWithPin };
+  // The masked record of one of the customer's own transactions, for a drafted case message, with a `scrub` that
+  // hides the counterparty's name wherever the customer typed it. The real name stays in this function: only its
+  // initials come out. Null when the reference is not one of the customer's own rows or history is not readable.
+  async function caseTransaction(conversation, token, entitlements, reference) {
+    if (typeof reference !== 'string' || !REFERENCE.test(reference)) return null;
+    const rows = await ownHistory(conversation, token, entitlements);
+    const found = rows && withReference(rows, reference);
+    if (!found) return null;
+    const words = String(found.partnerlib ?? '').split(/\s+/).filter((w) => [...w].length >= 3);
+    const named = words.map((w) => new RegExp(`(?<![\\p{L}\\p{N}])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'giu'));
+    return {
+      transaction: { ...maskTransaction(found, conversation.session.wallet), reference },
+      scrub: (text) => named.reduce((out, re) => out.replace(re, (w) => `${[...w][0].toUpperCase()}.`), text),
+    };
+  }
+
+  return { run, start, ownHistory, caseTransaction, unlockWithPortalFlag, unlockWithPin };
 }

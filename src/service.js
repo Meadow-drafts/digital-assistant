@@ -16,6 +16,7 @@ import { MESSAGES as T1_MESSAGES, TOOL_RULES, UNLOCK_MS, createT1, parseToolCall
 import { ownerOf, subjectOf, tokenOf } from './identity.js';
 import { readJson } from './http.js';
 import { createHandoff } from './handoff.js';
+import { createDrafts } from './draft.js';
 
 const PUBLIC = new URL('../public/', import.meta.url);
 // Only these files are served; no user-controlled path ever reaches the disk.
@@ -378,6 +379,8 @@ export function createService({ devPage, model, gateway, clock, audit, guides, n
             const masked = JSON.stringify(done.result);
             toolAudit = { name: done.name, outcome: 'ok', data: masked, source: routed.toolSource };
             send(res, 'tool', { name: done.name, result: done.result });
+            // A drafted case message about "that transfer" needs to know which one the customer was asking about.
+            if (['transfer_status', 'explain_failure'].includes(done.name) && done.result.found) conversation.lastReference = done.result.transaction.reference;
             if (done.name === 'explain_failure') await explain(done, guides.get(GUIDE_ID)[language]);
             else await answer(dataMessages(masked, history));
             if (done.notice && !filtered) {
@@ -464,8 +467,14 @@ export function createService({ devPage, model, gateway, clock, audit, guides, n
     res.end();
   }
 
+  const drafts = createDrafts({ t1, entitlementsFor, conversations, handoff, supportAddress: support?.mail?.supportAddress, mailer, clock, audit });
+
   return http.createServer((req, res) => {
     const fail = () => { if (!res.headersSent) res.writeHead(500); res.end(); };
+    if (/^\/draft(\/|\?|$)/.test(req.url)) {
+      drafts(req, res).then((served) => { if (!served) res.writeHead(404).end(); }, fail);
+      return;
+    }
     if (/^\/(handoff|case|agent)(\/|\?|$)/.test(req.url)) {
       handoff(req, res).then((served) => { if (!served) res.writeHead(404).end(); }, fail);
       return;

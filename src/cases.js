@@ -7,9 +7,10 @@ export function createCaseStore({ clock }) {
   let counter = 1000;
 
   return {
-    open({ conversationId, owner, tenant, language }) {
-      const ref = `C-${++counter}`;
-      const found = { ref, conversationId, owner, tenant: tenant ?? null, language, state: 'waiting', openedAt: clock.now(), agent: null, closeReason: null, solved: null, transcript: [] };
+    // A reference can be reserved before its case exists, so a drafted message can show it in the email subject.
+    reserveRef: () => `C-${++counter}`,
+    open({ conversationId, owner, tenant, language, ref = `C-${++counter}`, state = 'waiting' }) {
+      const found = { ref, conversationId, owner, tenant: tenant ?? null, language, state, openedAt: clock.now(), agent: null, closeReason: null, solved: null, transcript: [] };
       cases.set(ref, found);
       return found;
     },
