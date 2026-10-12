@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Banking assistant demo host</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; background: #f5f6f8; color: #1a1a1a; }
+    bank-assistant { display: block; max-width: 28rem; }
+    .ba-root { background: #fff; border: 1px solid #d0d4da; border-radius: 8px; padding: 1rem; display: grid; gap: .5rem; }
+    [data-role="messages"] { min-height: 12rem; max-height: 24rem; overflow-y: auto; display: grid; gap: .5rem; align-content: start; }
+    [data-role="message"] { padding: .5rem .75rem; border-radius: 8px; max-width: 85%; white-space: pre-wrap; }
+    [data-from="user"] { background: #dbe8ff; justify-self: end; }
+    [data-from="assistant"] { background: #eef0f3; justify-self: start; }
+    [data-role="thinking"] { color: #666; font-style: italic; }
+    [data-role="form"] { display: flex; gap: .5rem; }
+    [data-role="input"] { flex: 1; padding: .5rem; }
+    [data-role="disclaimer"] { margin: 0; font-size: .8rem; color: #555; }
+  </style>
+</head>
+<body>
+  <h1>Portal (demo host)</h1>
+  <p>Standalone page that stands in for the portal. The portal change is this one tag and one script.</p>
+  <bank-assistant tenant="demo" token="demo-token"></bank-assistant>
+  <script src="/widget.js"></script>
+</body>
+</html>
