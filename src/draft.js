@@ -139,11 +139,14 @@ export function createDrafts({ t1, entitlementsFor, conversations, handoff, supp
     json(res, 200, { ...view, destination, confirmation: CONFIRMATION[language](draft.ref, SENT_TO[destination][language]) });
   }
 
-  return async function handle(req, res) {
+  async function handle(req, res) {
     const url = new URL(req.url, 'http://local');
     if (req.method === 'POST' && url.pathname === '/draft') { await create(req, res); return true; }
     if (req.method === 'POST' && url.pathname === '/draft/preview') { await preview(req, res); return true; }
     if (req.method === 'POST' && url.pathname === '/draft/confirm') { await confirm(req, res); return true; }
     return false;
-  };
+  }
+  // Retention: a forgotten conversation takes its draft with it.
+  handle.forget = (conversationId) => drafts.delete(conversationId);
+  return handle;
 }

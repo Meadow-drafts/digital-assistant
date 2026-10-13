@@ -56,5 +56,16 @@ export function createCaseStore({ clock }) {
     // The case that currently matters for a conversation: the newest one.
     latestFor: (conversationId) => [...cases.values()].filter((c) => c.conversationId === conversationId).at(-1) ?? null,
     all: () => [...cases.values()],
+    // Retention: forgets closed cases (resolved, cancelled or only emailed) whose last activity is older than the cutoff.
+    // A case still waiting or with an agent is live work and stays. Returns how many went.
+    purge(cutoff) {
+      let removed = 0;
+      for (const [ref, c] of cases) {
+        if (c.state === 'waiting' || c.state === 'with_agent') continue;
+        const last = Math.max(c.openedAt, c.resolvedAt ?? 0, ...c.transcript.map((m) => m.at));
+        if (last < cutoff) { cases.delete(ref); removed += 1; }
+      }
+      return removed;
+    },
   };
 }

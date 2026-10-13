@@ -1,0 +1,4 @@
+{
+  "_note": "One retention value for customer transcripts and the audit log (and the failed-question log). Placeholder until the bank answers the compliance question (ticket 11, Q4). RETENTION_DAYS in the environment overrides it.",
+  "retentionDays": 30
+}

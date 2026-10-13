@@ -7,6 +7,8 @@ export const AGENTS = {
     { id: 'paul', name: 'Paul Etoga', email: 'paul@bank.test', password: 'paul-pass' },
   ],
   onCall: ['aline'],
+  // Staff allowed to read the audit log; Paul is an ordinary agent.
+  auditReaders: ['aline'],
 };
 export const CONSOLE_URL = 'https://support.bank.test/console';
 

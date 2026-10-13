@@ -302,7 +302,7 @@ export function createT1({ gateway, clock, etab = ETAB }) {
       if (def.needsUnlock && !(conversation.unlock?.until > clock.now())) return { kind: 'fixed', code: 'pin_required', name: toolCall.name };
       const result = await reads[toolCall.name](session, args, { tenant: session.tenant, token });
       const notice = toolCall.name === 'last_transactions' && entitlements && !entitlements.primaryConnect ? 'primary_only' : null;
-      return { kind: 'data', name: toolCall.name, result, notice };
+      return { kind: 'data', name: toolCall.name, args, result, notice };
     } catch (e) {
       if (e instanceof Rejected) return { kind: 'fixed', code: 'rejected', reason: e.message, name: toolCall.name };
       if (e instanceof SessionExpired) {

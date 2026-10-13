@@ -224,7 +224,10 @@ test('details are never invented: a reference that is not the customer\'s own, o
     assert.equal(res.body.detailsFound, false);
     assert.deepEqual(res.body.details, []);
     assert.match(res.body.text, /wrong person/);
-    assert.doesNotMatch(JSON.stringify(res.body), /777|REF-BOB/);
+    // Everything except the generated draft id: a random UUID can contain "777" by chance.
+    const { draftId, ...shown } = res.body;
+    assert.ok(draftId);
+    assert.doesNotMatch(JSON.stringify(shown), /777|REF-BOB/);
   }
   assert.deepEqual(svc.mailer.outbox, []);
 });

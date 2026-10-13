@@ -19,6 +19,8 @@ export function loadSupport(path) {
   }
   const onCall = raw.agents?.onCall;
   if (!Array.isArray(onCall) || !onCall.every((id) => list.some((a) => a.id === id))) fail('agents.onCall must list ids from agents.list');
+  const auditReaders = raw.agents?.auditReaders ?? [];
+  if (!Array.isArray(auditReaders) || !auditReaders.every((id) => list.some((a) => a.id === id))) fail('agents.auditReaders must list ids from agents.list');
   const sessionMs = raw.agents?.sessionMs ?? 8 * 60 * 60_000;
   if (!positive(sessionMs)) fail('agents.sessionMs must be a positive number');
 
@@ -36,7 +38,7 @@ export function loadSupport(path) {
   if (typeof mail.supportAddress !== 'string' || !ADDRESS.test(mail.supportAddress)) fail('mail.supportAddress must be the support team\'s email address');
 
   return {
-    agents: { list, onCall, sessionMs },
+    agents: { list, onCall, auditReaders, sessionMs },
     timers: Object.fromEntries(TIMER_KEYS.map((k) => [k, timers[k]])),
     hours: { utcOffsetMinutes: h.utcOffsetMinutes, days: h.days, open: h.open, close: h.close },
     mail,

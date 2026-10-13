@@ -29,6 +29,7 @@
     [data-role="line"][data-from="system"] { justify-self: center; background: none; color: #6b6b66; font-style: italic; }
     h3 { font-size: .8rem; margin: 0 0 .25rem; color: #6b6b66; }
     .block { background: #faf9f5; border: 1px solid #dcdad2; border-radius: 6px; padding: .5rem .75rem; margin: .5rem 0; white-space: pre-wrap; }
+    [data-role="audit-row"] { display: grid; grid-template-columns: 11rem 9rem 1fr; gap: .5rem; font-size: 12px; padding: .2rem 0; border-top: 1px solid #ecebe4; overflow-wrap: anywhere; }
     [data-role="record"] { font-variant-numeric: tabular-nums; padding: .15rem 0; border-top: 1px solid #ecebe4; }
     .flag { background: #fee2e2; color: #991b1b; border-radius: 4px; padding: 0 .4rem; font-weight: 600; font-size: 12px; }
     .who { display: block; font-size: 11px; color: #6b6b66; }
@@ -51,7 +52,18 @@
   </form>
 
   <div data-role="console" hidden>
-    <p class="note"><span data-role="agent-name"></span> · <button data-role="logout" type="button">Sign out</button></p>
+    <p class="note"><span data-role="agent-name"></span> · <button data-role="audit-open" type="button" hidden>Audit log</button> <button data-role="logout" type="button">Sign out</button></p>
+    <section class="card" data-role="audit-panel" hidden style="margin-bottom: 1rem">
+      <h2>Audit log (read only, newest first)</h2>
+      <form data-role="audit-form" class="row">
+        <input data-role="audit-conversation" type="text" placeholder="Conversation id" aria-label="Conversation id" />
+        <input data-role="audit-outcome" type="text" placeholder="Outcome, e.g. case_claimed" aria-label="Outcome" />
+        <button type="submit">Show</button>
+        <button data-role="audit-close" type="button">Close</button>
+      </form>
+      <p class="error" data-role="audit-error" role="alert"></p>
+      <div data-role="audit-rows"></div>
+    </section>
     <div class="grid">
       <section class="card">
         <h2>Cases</h2>

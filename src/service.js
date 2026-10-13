@@ -17,6 +17,8 @@ import { ownerOf, subjectOf, tokenOf } from './identity.js';
 import { readJson } from './http.js';
 import { createHandoff } from './handoff.js';
 import { createDrafts } from './draft.js';
+import { createAuditTrail } from './audit.js';
+import { createRetention } from './retention.js';
 
 const PUBLIC = new URL('../public/', import.meta.url);
 // Only these files are served; no user-controlled path ever reaches the disk.
@@ -82,7 +84,9 @@ async function routeGuides({ model, language, available, guides, history, tools 
   return { picks: [...new Set(picks)].filter((id) => allowed.has(id)).slice(0, MAX_GUIDES), refusal: null };
 }
 
-export function createService({ devPage, model, gateway, clock, audit, guides, navigation, prefill, scamCues, entitlements, failedQuestions, outputAllowlist, limits, mailer, agents, support, consoleUrl }) {
+export function createService({ devPage, model, gateway, clock, audit: auditSink, guides, navigation, prefill, scamCues, entitlements, failedQuestions, outputAllowlist, limits, mailer, agents, support, consoleUrl, retention }) {
+  // Every audit record goes through the trail: complete fields, nothing secret-shaped stored.
+  const audit = createAuditTrail({ sink: auditSink, clock });
   const t1 = gateway ? createT1({ gateway, clock }) : null;
   const limiter = createLimiter({ clock, limits });
   const checkOutput = createOutputFilter({ allowlist: outputAllowlist, protectedTexts: PROTECTED_TEXTS });
@@ -160,6 +164,7 @@ export function createService({ devPage, model, gateway, clock, audit, guides, n
     const session = Object.freeze({ ...started.session, entitlements: Object.freeze(entitlementsFromWidget) });
     const conversationId = known ? body.conversationId : randomUUID();
     const conversation = known ?? { owner, history: [], language: 'en', asked: new Set(), session: null };
+    conversation.lastActiveAt = clock.now();
     conversation.session = session;
     conversation.unlock = null; // a new session starts with the balance locked
     conversations.set(conversationId, conversation);
@@ -225,6 +230,7 @@ export function createService({ devPage, model, gateway, clock, audit, guides, n
     }
     const conversationId = known ? body.conversationId : randomUUID();
     const conversation = known ?? { owner, history: [], language: 'en', asked: new Set(), session: null };
+    conversation.lastActiveAt = clock.now();
     const language = detectLanguage(body.message, conversation.language);
     // With a human agent the bot is muted: the message goes to the agent, nothing is sent to the model.
     const withAgent = known ? handoff.agentCaseFor(body.conversationId) : null;
@@ -380,7 +386,7 @@ export function createService({ devPage, model, gateway, clock, audit, guides, n
           const done = t1 ? await t1.run({ call: routed.tool, conversation, token: tokenOf(req), entitlements: ent }) : { kind: 'fixed', code: 'session_expired', name: routed.tool.name };
           if (done.kind === 'data') {
             const masked = JSON.stringify(done.result);
-            toolAudit = { name: done.name, outcome: 'ok', data: masked, source: routed.toolSource };
+            toolAudit = { name: done.name, args: done.args, outcome: 'ok', data: masked, source: routed.toolSource };
             send(res, 'tool', { name: done.name, result: done.result });
             // A drafted case message about "that transfer" needs to know which one the customer was asking about.
             if (['transfer_status', 'explain_failure'].includes(done.name) && done.result.found) conversation.lastReference = done.result.transaction.reference;
@@ -465,14 +471,14 @@ export function createService({ devPage, model, gateway, clock, audit, guides, n
       ...(scam.length ? { scamCues: scam } : {}),
       ...(navigateAudit ? { navigate: navigateAudit } : {}),
       ...(prefillAudit ? { prefill: prefillAudit } : {}),
-      ...(toolAudit ? { tool: toolAudit.name, toolOutcome: toolAudit.outcome, toolSource: toolAudit.source, ...(toolAudit.reason ? { toolReason: toolAudit.reason } : {}), ...(toolAudit.data ? { toolData: toolAudit.data } : {}) } : {}),
+      ...(toolAudit ? { tool: toolAudit.name, ...(toolAudit.args ? { toolArgs: toolAudit.args } : {}), toolOutcome: toolAudit.outcome, toolSource: toolAudit.source, ...(toolAudit.reason ? { toolReason: toolAudit.reason } : {}), ...(toolAudit.data ? { toolData: toolAudit.data } : {}) } : {}),
     });
     res.end();
   }
 
   const drafts = createDrafts({ t1, entitlementsFor, conversations, handoff, supportAddress: support?.mail?.supportAddress, mailer, clock, audit });
 
-  return http.createServer((req, res) => {
+  const server = http.createServer((req, res) => {
     const fail = () => { if (!res.headersSent) res.writeHead(500); res.end(); };
     if (/^\/draft(\/|\?|$)/.test(req.url)) {
       drafts(req, res).then((served) => { if (!served) res.writeHead(404).end(); }, fail);
@@ -504,4 +510,11 @@ export function createService({ devPage, model, gateway, clock, audit, guides, n
     }
     res.writeHead(404).end();
   });
+  // Retention (ticket 33): with a retention value the purge job exists, runs on the clock, and stops with the server.
+  if (retention) {
+    server.retention = createRetention({ clock, ms: retention.ms, audit, failedQuestions, conversations, handoff, drafts });
+    server.retention.start();
+    server.on('close', () => server.retention.stop());
+  }
+  return server;
 }

@@ -6,6 +6,7 @@
       { "id": "paul", "name": "Paul Etoga", "email": "paul@example.test", "password": "change-me-paul" }
     ],
     "onCall": ["aline"],
+    "auditReaders": ["aline"],
     "sessionMs": 28800000
   },
   "timers": {

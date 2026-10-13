@@ -1,4 +1,5 @@
-import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { verifyPassword } from './password.js';
 import { createCaseStore } from './cases.js';
 import { createHours } from './hours.js';
 import { json, readJson } from './http.js';
@@ -57,8 +58,6 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
   // Demo agent login: the agents come from config, sessions live in memory for sessionMs.
   const sessions = new Map();
   const sessionMs = agents?.sessionMs ?? 8 * 60 * 60_000;
-  const digest = (v) => createHash('sha256').update(String(v)).digest();
-  const samePassword = (given, expected) => timingSafeEqual(digest(given), digest(expected));
 
   // The one place text enters a case transcript. Everything except an agent's own words is masked first.
   const add = (c, from, text, extra) => store.append(c, from, from === 'agent' || from === 'system' ? text : maskText(text), extra);
@@ -79,7 +78,7 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
 
   const record = (c, outcome, extra = {}) => audit.append({
     time: new Date(clock.now()).toISOString(), user: c.owner, tenant: c.tenant, conversationId: c.conversationId,
-    userText: '', replyText: '', outcome, caseRef: c.ref, ...extra,
+    userText: '', replyText: '', outcome, caseRef: c.ref, caseState: c.state, ...(c.closeReason ? { closeReason: c.closeReason } : {}), ...extra,
   });
 
   // Mail never throws into a request or a timer: a failed send is audited and the case carries on.
@@ -250,11 +249,13 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
     // A customer can ask for a person before saying anything: that starts a conversation.
     const conversationId = known ? body.conversationId : randomUUID();
     const conversation = known ?? { owner, history: [], language: 'en', asked: new Set(), session: null };
+    conversation.lastActiveAt = clock.now();
     conversations.set(conversationId, conversation);
     const open = store.latestFor(conversationId);
     if (open && (open.state === 'waiting' || open.state === 'with_agent')) { json(res, 200, { conversationId, ...view(open) }); return; }
     if (reopenable(open)) { await reopen(open); json(res, 200, { conversationId, ...view(open) }); return; }
-    const c = await startCase({ conversationId, conversation, owner, tenant: typeof body?.tenant === 'string' ? body.tenant.slice(0, 40) : null, req });
+    const tenant = typeof body?.tenant === 'string' ? body.tenant.slice(0, 40) : conversation.session?.tenant ?? null;
+    const c = await startCase({ conversationId, conversation, owner, tenant, req });
     json(res, 200, { conversationId, ...view(c) });
   }
 
@@ -296,11 +297,25 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
     try { body = await readJson(req); } catch { json(res, 400, { error: 'bad_request' }); return; }
     const agent = agents?.list?.find((a) => a.id === body?.id);
     // The password is compared even for an unknown id, so the answer does not reveal which ids exist.
-    const ok = samePassword(body?.password ?? '', agent?.password ?? randomUUID());
+    const ok = verifyPassword(body?.password ?? '', agent?.password ?? randomUUID());
     if (!agent || !ok) { json(res, 401, { error: 'login_failed' }); return; }
     const token = randomUUID();
     sessions.set(token, { agent, expiresAt: clock.now() + sessionMs });
-    json(res, 200, { token, name: agent.name });
+    json(res, 200, { token, name: agent.name, canReadAudit: canReadAudit(agent) });
+  }
+
+  // Only staff named in agents.auditReaders may read the audit log; being an agent is not enough.
+  const canReadAudit = (agent) => (agents?.auditReaders ?? []).includes(agent.id);
+  const MAX_AUDIT_ROWS = 500;
+  async function auditView(req, res, url) {
+    const agent = agentOf(req, res);
+    if (!agent) return;
+    if (req.method !== 'GET') { json(res, 405, { error: 'read_only' }); return; }
+    if (!canReadAudit(agent)) { json(res, 403, { error: 'not_authorised' }); return; }
+    const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : 100;
+    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_AUDIT_ROWS) { json(res, 400, { error: 'bad_limit' }); return; }
+    const records = await audit.read({ conversationId: url.searchParams.get('conversationId') || undefined, outcome: url.searchParams.get('outcome') || undefined, limit });
+    json(res, 200, { records });
   }
 
   // The logged-in agent, or a 401 that says nothing else.
@@ -430,6 +445,7 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
     if (req.method === 'POST' && url.pathname === '/case/cancel') { await cancelCase(req, res); return true; }
     if (req.method === 'POST' && url.pathname === '/case/feedback') { await solvedFeedback(req, res); return true; }
     if (req.method === 'POST' && url.pathname === '/agent/login') { await agentLogin(req, res); return true; }
+    if (url.pathname === '/agent/audit') { await auditView(req, res, url); return true; }
     if (req.method === 'GET' && url.pathname === '/agent/cases') { agentCases(req, res); return true; }
     const target = /^\/agent\/cases\/([A-Za-z0-9-]{1,20})(?:\/(claim|messages|resolve|transfer))?$/.exec(url.pathname);
     if (target) {
@@ -482,6 +498,7 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
     return counts && reopenable(c) ? c.ref : null;
   };
   handle.refInUse = (ref) => Boolean(store.get(ref));
+  handle.purge = (cutoff) => store.purge(cutoff);
   handle.openCaseFor = (conversationId) => {
     const c = store.latestFor(conversationId);
     return c && (c.state === 'waiting' || c.state === 'with_agent') ? c : null;

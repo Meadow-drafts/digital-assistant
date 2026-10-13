@@ -8,8 +8,9 @@ let me = null;
 let selected = new URLSearchParams(location.search).get('case');
 let timer = null;
 let shownLines = '';
+let canReadAudit = false;
 
-try { token = sessionStorage.getItem('console:token'); me = sessionStorage.getItem('console:name'); } catch { /* no storage: sign in again */ }
+try { token = sessionStorage.getItem('console:token'); me = sessionStorage.getItem('console:name'); canReadAudit = sessionStorage.getItem('console:audit') === '1'; } catch { /* no storage: sign in again */ }
 
 async function api(method, path, body) {
   const res = await fetch(path, {
@@ -26,7 +27,9 @@ function signOut() {
   token = null;
   me = null;
   clearTimeout(timer);
-  try { sessionStorage.removeItem('console:token'); sessionStorage.removeItem('console:name'); } catch { /* nothing stored */ }
+  canReadAudit = false;
+  try { sessionStorage.removeItem('console:token'); sessionStorage.removeItem('console:name'); sessionStorage.removeItem('console:audit'); } catch { /* nothing stored */ }
+  $('audit-panel').hidden = true;
   $('console').hidden = true;
   $('login-form').hidden = false;
 }
@@ -35,6 +38,7 @@ function showConsole() {
   $('login-form').hidden = true;
   $('console').hidden = false;
   $('agent-name').textContent = me ?? '';
+  $('audit-open').hidden = !canReadAudit; // the service enforces it; this only keeps the button away from staff who cannot use it
   refresh();
 }
 
@@ -147,11 +151,38 @@ $('login-form').addEventListener('submit', async (e) => {
   if (!res.ok) { $('login-error').textContent = 'Wrong agent id or password.'; return; }
   token = res.body.token;
   me = res.body.name;
-  try { sessionStorage.setItem('console:token', token); sessionStorage.setItem('console:name', me); } catch { /* works for this page load only */ }
+  canReadAudit = res.body.canReadAudit === true;
+  try { sessionStorage.setItem('console:token', token); sessionStorage.setItem('console:name', me); sessionStorage.setItem('console:audit', canReadAudit ? '1' : '0'); } catch { /* works for this page load only */ }
   showConsole();
 });
 
 $('logout').addEventListener('click', signOut);
+
+// Audit log reader (authorised staff only; the service refuses everyone else). Read only, set as text.
+async function loadAudit() {
+  $('audit-error').textContent = '';
+  const query = new URLSearchParams();
+  if ($('audit-conversation').value.trim()) query.set('conversationId', $('audit-conversation').value.trim());
+  if ($('audit-outcome').value.trim()) query.set('outcome', $('audit-outcome').value.trim());
+  const res = await api('GET', `/agent/audit${query.size ? `?${query}` : ''}`);
+  if (!res.ok) { $('audit-error').textContent = res.status === 403 ? 'You are not authorised to read the audit log.' : 'Could not load the audit log.'; $('audit-rows').replaceChildren(); return; }
+  const detail = (r) => Object.entries(r)
+    .filter(([k, v]) => !['time', 'user', 'outcome'].includes(k) && v !== '' && v !== null && !(Array.isArray(v) && !v.length))
+    .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join(' · ');
+  $('audit-rows').replaceChildren(...res.body.records.map((r) => {
+    const row = document.createElement('div');
+    row.dataset.role = 'audit-row';
+    for (const text of [r.time, r.outcome ?? '', `${r.user} · ${detail(r)}`]) {
+      const cell = document.createElement('span');
+      cell.textContent = text;
+      row.append(cell);
+    }
+    return row;
+  }));
+}
+$('audit-open').addEventListener('click', () => { $('audit-panel').hidden = false; loadAudit(); });
+$('audit-close').addEventListener('click', () => { $('audit-panel').hidden = true; });
+$('audit-form').addEventListener('submit', (e) => { e.preventDefault(); loadAudit(); });
 
 $('claim').addEventListener('click', async () => {
   $('claim-error').textContent = '';
