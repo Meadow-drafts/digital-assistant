@@ -55,9 +55,10 @@ const DAY = 24 * 60 * 60_000;
 // Used 99000, Requested 5000. Please try again in 14m3.2s"). Returns how long to leave that model alone, or null
 // for any other error. The provider's retry-after can be tiny while the request still does not fit, so the wait is
 // the longer of that and the time the missing tokens need to come back at the daily limit spread over 24 hours.
+export const isDailyTokenLimit = (err) => err?.status === 429 && /tokens per day|\bTPD\b/i.test(err.detail ?? '');
 function dailyTokenWait(err) {
   const detail = err?.detail ?? '';
-  if (err?.status !== 429 || !/tokens per day|\bTPD\b/i.test(detail)) return null;
+  if (!isDailyTokenLimit(err)) return null;
   const [, h, m, s] = /try again in (?:(\d+)h)?(?:(\d+)m(?!s))?(?:([\d.]+)s)?/i.exec(detail) ?? [];
   const retryAfter = (Number(h ?? 0) * 3600 + Number(m ?? 0) * 60 + Number(s ?? 0)) * 1000;
   const [limit, used, requested] = ['Limit', 'Used', 'Requested'].map((k) => Number(new RegExp(`\\b${k}\\s+(\\d+)`, 'i').exec(detail)?.[1]));

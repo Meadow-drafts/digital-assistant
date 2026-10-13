@@ -135,6 +135,67 @@ test('if the model cannot write a summary the case still opens, with no summary 
   assert.ok(body.transcript.length >= 2);
 });
 
+// The model fails the first `failures` summary calls, then writes `SUMMARY`.
+function flakyModel({ failures }) {
+  let n = 0;
+  const m = createFakeModel((request) => {
+    if (request.purpose === 'summary') return ++n <= failures ? new Error('down') : SUMMARY;
+    return request.purpose === 'route' ? '[]' : 'Here is some general help.';
+  });
+  m.summaryCalls = () => m.calls.filter((c) => c.purpose === 'summary');
+  return m;
+}
+
+test('a summary that failed at handoff is tried again on claim, even though the bot said nothing more', async (t) => {
+  const m = flakyModel({ failures: 1 });
+  const { svc, open } = await handoff(t, { m });
+  const { body: { ref } } = await open();
+  const aline = await agentLogin(svc.baseUrl, 'aline');
+  assert.equal((await aline.open(ref)).body.summary, null, 'until someone claims there is nothing to show');
+
+  await aline.claim(ref);
+  const { body } = await aline.open(ref);
+
+  assert.equal(m.summaryCalls().length, 2);
+  assert.equal(body.summary.text, SUMMARY);
+  assert.equal(body.summaryUnavailable, false);
+});
+
+test('the retry happens once: if it fails too, the claim stands and the model is not asked again', async (t) => {
+  const m = flakyModel({ failures: 2 });
+  const { svc, open } = await handoff(t, { m });
+  const { body: { ref } } = await open();
+  const aline = await agentLogin(svc.baseUrl, 'aline');
+  await aline.claim(ref);
+
+  const first = await aline.open(ref);
+  const second = await aline.open(ref);
+
+  assert.equal(m.summaryCalls().length, 2);
+  assert.equal(first.body.summary, null);
+  assert.equal(second.body.summaryUnavailable, true);
+});
+
+// What the model adapter throws when a provider says the day's tokens are used up (see dailyTokenWait in src/model.js).
+const exhausted = () => Object.assign(new Error('provider returned 429'), { status: 429, detail: 'Rate limit reached on tokens per day (TPD): Limit 100000, Used 99900, Requested 500.' });
+
+test('when the model is out of tokens the summary is skipped with a summary_unavailable audit entry and the console says "No summary available"', async (t) => {
+  const m = createFakeModel((request) => (request.purpose === 'summary' ? exhausted() : request.purpose === 'route' ? '[]' : 'ok'));
+  const { svc, open } = await handoff(t, { m });
+  const { status, body: { ref } } = await open();
+  const w = await consolePage(svc, t, 'aline', `/console?case=${ref}`);
+  await w.until(() => w.q('detail-ref')?.textContent.includes(ref));
+
+  w.q('claim').click();
+  await w.until(() => !w.q('reply-send').disabled);
+
+  assert.equal(status, 200, 'the handoff still opens');
+  assert.match(w.q('summary-text').textContent, /No summary available/);
+  const outcomes = svc.audit.records.filter((r) => r.caseRef === ref).map((r) => r.outcome);
+  assert.ok(outcomes.includes('summary_unavailable'));
+  assert.ok(!outcomes.includes('summary_failed'), 'an exhausted model is not reported as a plain failure');
+});
+
 test('when no summary could be written the console says "No summary available" and the case still works', async (t) => {
   const m = createFakeModel((request) => (request.purpose === 'summary' ? new Error('429 tokens per day') : request.purpose === 'route' ? '[]' : 'ok'));
   const { svc, open } = await handoff(t, { m });

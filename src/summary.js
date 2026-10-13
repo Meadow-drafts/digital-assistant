@@ -1,5 +1,6 @@
 import { maskText } from './mask.js';
 import { shield } from './shield.js';
+import { isDailyTokenLimit } from './model.js';
 
 // The AI summary an agent sees first. The model gets only the case transcript, which is already masked, and its
 // answer is cleaned again on the way out: nothing it writes can carry a PIN, OTP, token or long identifier.
@@ -23,17 +24,18 @@ export function cleanSummary(text) {
 }
 
 export function createSummarizer({ model }) {
-  // Resolves to the cleaned summary, or null when there is nothing to summarise or the model cannot be reached.
+  // Resolves to { text } with the cleaned summary, or { text: null } when there is nothing to summarise or the model
+  // cannot be reached; `exhausted` is set when the model's tokens for the day are used up.
   return async function summarize(transcript, language) {
     const lines = transcript.filter((m) => WHO[m.from]).map((m) => `${WHO[m.from]}: ${m.text}`);
-    if (!model || !lines.length) return null;
+    if (!model || !lines.length) return { text: null };
     try {
       let raw = '';
       for await (const part of model.chat({
         purpose: 'summary', language,
         messages: [{ role: 'system', content: INSTRUCTIONS[language] ?? INSTRUCTIONS.en }, { role: 'user', content: `<transcript>\n${lines.join('\n')}\n</transcript>` }],
       })) if (typeof part === 'string') raw += part;
-      return cleanSummary(raw) || null;
-    } catch { return null; }
+      return { text: cleanSummary(raw) || null };
+    } catch (err) { return { text: null, exhausted: isDailyTokenLimit(err) }; }
   };
 }

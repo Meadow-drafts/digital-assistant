@@ -165,9 +165,10 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
   function generateSummary(c) {
     const upTo = c.transcript.length;
     c.summaryUpTo = upTo; // set now, not when the model answers: "did the bot chat since?" must not depend on timing
-    c.summaryPending = Promise.resolve(c.summaryPending).then(() => summarize(c.transcript.slice(0, upTo), c.language)).then(async (text) => {
+    c.summaryPending = Promise.resolve(c.summaryPending).then(() => summarize(c.transcript.slice(0, upTo), c.language)).then(async ({ text, exhausted }) => {
+      c.summaryFailed = !text; // remembered so a claim can tell "never written" from "written, bot said nothing more"
       if (text) { c.summary = { text, upTo, at: clock.now(), regenerated: Boolean(c.summary) }; await record(c, c.summary.regenerated ? 'summary_regenerated' : 'summary_created'); }
-      else await record(c, 'summary_failed');
+      else await record(c, exhausted ? 'summary_unavailable' : 'summary_failed');
     });
     return c.summaryPending;
   }
@@ -463,8 +464,11 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
     if (held && isOpenToPool(held) && held.agent.id !== agent.id) { await takeOverCase(res, agent, ref); return; }
     const claimed = store.claim(ref, agent);
     if (!claimed.ok) { json(res, claimed.reason === 'not_found' ? 404 : 409, { error: claimed.reason }); return; }
-    // The summary dates from the handoff. It is made again only if the bot answered the customer after that.
-    if (claimed.case.transcript.some((m) => m.from === 'bot' && m.seq > claimed.case.summaryUpTo)) generateSummary(claimed.case);
+    // The summary dates from the handoff. It is made again if the bot answered the customer after that, or once if the
+    // last attempt failed (a good summary is never regenerated just because the agent claimed).
+    const botChatted = claimed.case.transcript.some((m) => m.from === 'bot' && m.seq > claimed.case.summaryUpTo);
+    const retry = claimed.case.summaryFailed && !claimed.case.summaryRetried;
+    if (botChatted || retry) { claimed.case.summaryRetried = true; generateSummary(claimed.case); }
     awaitAgent(claimed.case);
     touch(claimed.case);
     customerSeen(claimed.case); // the customer was in the queue a moment ago; the clock for "gone" starts from the claim
