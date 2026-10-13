@@ -145,6 +145,7 @@ const TOOLS = {
     allowed: ['count'],
   },
   transfer_status: {
+    packages: ['HIST'],
     allowed: ['reference'],
     args: (a) => (typeof a.reference === 'string' && REFERENCE.test(a.reference) ? { reference: a.reference } : null),
   },
@@ -266,16 +267,6 @@ export function createT1({ gateway, clock, etab = ETAB }) {
     }
   }
 
-  // The status row for a reference, only if it is this session's wallet's. The backend looks the reference up
-  // across everyone, so any other row is treated exactly like a missing one.
-  async function ownStatus(session, reference, ctx) {
-    const body = await call(ctx.tenant, ctx.token, {
-      method: 'GET', path: '/digitalbank/history/transactions',
-      query: { cli: session.cli, clientRefId: reference }, // as the portal asks
-    });
-    return body?.data && involves(body.data, session.wallet) ? body.data : null;
-  }
-
   // Nature labels (nomenclature 6000, the same table the portal's History page uses): code -> { en, fr }. Shared
   // bank reference data, not customer data. If it cannot be read the codes are shown instead; never an error.
   const natureCache = new Map(); // tenant -> { at, map }
@@ -325,8 +316,10 @@ export function createT1({ gateway, clock, etab = ETAB }) {
       return { transactions: shown.map((r) => maskTransaction(r, session.wallet, natures)), [DISPLAY]: { transactions: shown.map((r) => displayTransaction(r, session.wallet, natures)) } };
     },
     async transfer_status(session, { reference }, ctx) {
-      const found = await ownStatus(session, reference, ctx);
-      return found ? { found: true, transaction: maskTransaction(found, session.wallet) } : { found: false, reference };
+      // Same lookup as explain_failure: the customer's own history list, never the by-reference endpoint (slow, and it
+      // answers differently for someone else's reference than for an unknown one).
+      const found = withReference(await ownRows(session, ctx), reference);
+      return found ? { found: true, transaction: { ...maskTransaction(found, session.wallet), reference } } : { found: false, reference }; // the id the customer typed
     },
     async explain_failure(session, { reference }, ctx) {
       // The table shows ntrans or nhis, not clientReferenceId, so any of the three finds it. Only the customer's own

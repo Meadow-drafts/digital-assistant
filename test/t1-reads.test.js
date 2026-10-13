@@ -146,7 +146,8 @@ test('transfer status by reference: only the customer\'s own transfer is shown, 
   const model = createFakeModel((request) => {
     if (request.purpose !== 'route') return ['ok'];
     const last = request.messages.at(-1).content;
-    return /REF-BOB/.test(last) ? '[[tool:transfer_status {"reference":"REF-BOB"}]]' : '[[tool:transfer_status {"reference":"REF-ALICE"}]]';
+    const reference = /REF-(?:BOB|NOBODY)/.exec(last)?.[0] ?? 'REF-ALICE';
+    return `[[tool:transfer_status {"reference":"${reference}"}]]`;
   });
   const svc = await start({ customers: [a, b], model });
   t.after(svc.close);
@@ -154,13 +155,76 @@ test('transfer status by reference: only the customer\'s own transfer is shown, 
   const id = await begin(svc, a);
   const mine = await say(svc, a, 'status of REF-ALICE', id);
   assert.equal(mine.events.find((e) => e.type === 'tool').result.transaction.status, 'pending');
-  const statusCall = svc.gateway.calls.find((c) => c.path.endsWith('history/transactions'));
-  assert.deepEqual(statusCall.query, { cli: a.cli, clientRefId: 'REF-ALICE' }, 'as the portal asks');
+  assert.equal(svc.gateway.calls.some((c) => c.path === '/digitalbank/history/transactions'), false, 'the slow by-reference endpoint is never called');
+  assert.ok(svc.gateway.calls.some((c) => c.path === '/digitalbank/history/bipay-recent'), 'answered from the customer\'s own history list');
 
   const theirs = await say(svc, a, 'status of REF-BOB', id);
   const result = theirs.events.find((e) => e.type === 'tool').result;
   assert.equal(result.found, false);
   assert.doesNotMatch(wire(theirs.events), /777777|55566677788/);
+
+  // an unknown reference gets the identical reply
+  const unknown = await say(svc, a, 'status of REF-NOBODY', id);
+  const same = (e) => JSON.stringify(e.filter((x) => x.type === 'tool').map((x) => x.result)).replaceAll(/REF-[A-Z]+/g, 'REF');
+  assert.equal(same(unknown.events), same(theirs.events));
+});
+
+test('transfer_status and explain_failure find a transfer through the same history lookup, by any reference the portal shows', async (t) => {
+  const a = alice();
+  a.rows = [row(a, { clientReferenceId: 'REF-0001', ntrans: 'TRIB178273486318', nhis: '0004711', sta: '1000' })];
+  const model = createFakeModel((request) => {
+    if (request.purpose !== 'route') return ['ok'];
+    const last = request.messages.at(-1).content;
+    const tool = /why did/.test(last) ? 'explain_failure' : 'transfer_status';
+    return `[[tool:${tool} {"reference":"${/(REF-0001|TRIB178273486318|0004711)/.exec(last)[1]}"}]]`;
+  });
+  const svc = await start({ customers: [a], model });
+  t.after(svc.close);
+  const id = await begin(svc, a);
+
+  for (const reference of ['REF-0001', 'TRIB178273486318', '0004711']) {
+    svc.gateway.calls.length = 0;
+    const status = await say(svc, a, `status of ${reference}`, id);
+    const statusCalls = svc.gateway.calls.map((c) => `${c.method} ${c.path}`);
+    svc.gateway.calls.length = 0;
+    const why = await say(svc, a, `why did ${reference}`, id);
+    const whyCalls = svc.gateway.calls.map((c) => `${c.method} ${c.path}`);
+
+    assert.equal(status.events.find((e) => e.type === 'tool').result.transaction.status, 'pending', reference);
+    assert.equal(why.events.find((e) => e.type === 'tool').result.transaction.status, 'pending', reference);
+    assert.deepEqual(statusCalls, whyCalls, `same gateway lookup for ${reference}`);
+  }
+});
+
+test('transfer_status echoes the reference the customer asked about, so a different clientReferenceId does not read as not found', async (t) => {
+  const a = alice();
+  a.rows = [row(a, { clientReferenceId: '1f17ad9a-a255-6020-9e84-2621d4fd2183', ntrans: 'TRINW178352107047', nhis: '0004711', sta: '1000' })];
+  const model = createFakeModel((request) => (request.purpose !== 'route' ? ['ok'] : '[[tool:transfer_status {"reference":"TRINW178352107047"}]]'));
+  const svc = await start({ customers: [a], model });
+  t.after(svc.close);
+
+  const { events } = await say(svc, a, 'status of TRINW178352107047', await begin(svc, a));
+  const result = events.find((e) => e.type === 'tool').result;
+  assert.equal(result.found, true);
+  assert.equal(result.transaction.reference, 'TRINW178352107047');
+});
+
+test('when the bank cannot be reached in time, the status reply says so and offers to try again or talk to a human, never a hang', async (t) => {
+  const a = alice();
+  a.rows = [row(a, { clientReferenceId: 'REF-ALICE' })];
+  const model = toolModel('[[tool:transfer_status {"reference":"REF-ALICE"}]]');
+  const svc = await start({ customers: [a], model });
+  t.after(svc.close);
+  const id = await begin(svc, a);
+  svc.gateway.calls.length = 0;
+  svc.gateway.throwNext(Object.assign(new Error('timed out'), { name: 'TimeoutError' }));
+
+  const { events } = await say(svc, a, 'status of REF-ALICE', id);
+
+  assert.equal(events.find((e) => e.type === 'tool_blocked').code, 'unavailable');
+  assert.match(events.filter((e) => e.type === 'delta').map((e) => e.text).join(''), /try again.*talk to a human agent/);
+  assert.equal(svc.gateway.calls.length, 1, 'a timeout is not retried');
+  assert.ok(events.some((e) => e.type === 'done'));
 });
 
 test('fees and limits are read with a read-only lookup and labelled as the bank\'s limits, never the customer\'s own', async (t) => {
@@ -194,6 +258,20 @@ test('a package without history: the tool is never called and the customer is to
   const blocked = events.find((e) => e.type === 'tool_blocked');
   assert.equal(blocked.code, 'not_in_package');
   assert.match(events.filter((e) => e.type === 'delta').map((e) => e.text).join(''), /not included in your package/);
+});
+
+test('a package without history: the status of a transfer is not looked up either', async (t) => {
+  const a = alice();
+  a.rows = [row(a, { clientReferenceId: 'REF-ALICE' })];
+  const svc = await start({ customers: [a], model: toolModel('[[tool:transfer_status {"reference":"REF-ALICE"}]]') });
+  t.after(svc.close);
+  const id = await begin(svc, a, { gating: { usePackages: true, natureCodes: ['TRINC'], primaryConnect: true } });
+  svc.gateway.calls.length = 0;
+
+  const { events } = await say(svc, a, 'status of REF-ALICE', id);
+
+  assert.equal(svc.gateway.calls.length, 0);
+  assert.equal(events.find((e) => e.type === 'tool_blocked').code, 'not_in_package');
 });
 
 test('a secondary connect sees only its own wallet and is told history is for the primary connect, whatever the widget claims', async (t) => {
