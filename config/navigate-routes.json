@@ -22,6 +22,9 @@
     "en": "History",
     "fr": "Historique"
    },
+   "natures": [
+    "HIST"
+   ],
    "cta": {
     "en": "Click here to see your history",
     "fr": "Cliquez ici pour voir votre historique"

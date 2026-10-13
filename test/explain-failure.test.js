@@ -18,13 +18,14 @@ const status = (c, over = {}) => row(c, {
 });
 
 // A turn where the customer asks why a transfer failed. `answer` is what the fake model says after the data is read.
-async function ask(t, { rows, message, answer, tool = EXPLAIN('REF-0001'), customers }) {
+async function ask(t, { rows, message, answer, tool = EXPLAIN('REF-0001'), customers, gating, setup }) {
   const a = alice();
   a.rows = rows(a);
+  setup?.(a);
   const model = toolModel(tool, answer);
   const svc = await start({ customers: customers?.(a) ?? [a], model });
   t.after(svc.close);
-  const { events } = await say(svc, a, message, await begin(svc, a));
+  const { events } = await say(svc, a, message, await begin(svc, a, gating ? { gating } : undefined));
   return { a, svc, model, events };
 }
 
@@ -259,4 +260,99 @@ test('a record with no date or currency is described without the word null', asy
 
   assert.doesNotMatch(textOf(events), /null|undefined/);
   assert.match(textOf(events), /Transfer REF-0001 \(15000\) is still pending/);
+});
+
+// The history next step is the ticket 26 navigate mechanism: a validated card, offered only where the History page
+// is offered to this customer (package, primary connect). Where it is not, the step is the human one.
+const HIST = { usePackages: true, primaryConnect: true, pack: { natureCodes: ['HIST'] } };
+const NO_HIST = { usePackages: true, primaryConnect: true, pack: { natureCodes: ['TRINC'] } };
+const PENDING = (a) => [status(a, { sta: '1000', msg: null })];
+
+test('a customer with History gets the history next step as a validated navigate card', async (t) => {
+  const { events } = await ask(t, { rows: PENDING, message: MESSAGE.en, answer: 'unused', gating: HIST });
+
+  const [step] = nextSteps(events);
+  assert.equal(nextSteps(events).length, 1);
+  assert.equal(step.kind, 'history');
+  assert.deepEqual(step.card, { kind: 'navigate', target: 'history', path: '/history', label: 'History', button: 'Click here to see your history' });
+});
+
+for (const lang of ['en', 'fr']) {
+  test(`a customer without the HIST package is never pointed to History (${lang.toUpperCase()}): the human step replaces it and the text drops the pointer`, async (t) => {
+    const { events } = await ask(t, { rows: PENDING, message: MESSAGE[lang], answer: 'unused', gating: NO_HIST });
+
+    const reply = textOf(events);
+    const steps = nextSteps(events);
+    assert.deepEqual(steps.map((s) => s.kind), ['human']);
+    assert.equal(steps[0].card, undefined);
+    assert.match(steps[0].text, NEXT_TEXT.human[lang]);
+    assert.ok(reply.endsWith(steps[0].text));
+    assert.doesNotMatch(reply, /History|Historique/);
+    assert.match(reply, lang === 'en' ? /still pending.*Do not retry it/ : /en attente.*Ne réessayez pas/);
+    assert.equal(events.some((e) => e.type === 'action_card'), false);
+  });
+}
+
+// Customer matrix: the step depends on the History page being offered, whatever the outcome that wanted it.
+const SECONDARY = (a) => { a.primaryConnect = false; };
+const MATRIX = [
+  { name: 'with History', gating: HIST, card: true },
+  { name: 'without the HIST package', gating: NO_HIST, card: false },
+  { name: 'on a secondary connect with History (History is open to every connect)', gating: { ...HIST, primaryConnect: false }, setup: SECONDARY, card: true },
+  { name: 'on a secondary connect without the HIST package', gating: { ...NO_HIST, primaryConnect: false }, setup: SECONDARY, card: false },
+];
+const HISTORY_OUTCOMES = [
+  { name: 'pending', over: { sta: '1000', msg: null }, tool: EXPLAIN('REF-0001') },
+  { name: 'succeeded', over: { sta: '01', msg: null }, tool: EXPLAIN('REF-0001') },
+  { name: 'reversed', over: { reversedAt: '2026-10-12T08:00:00.000+00:00' }, tool: EXPLAIN('REF-0001') },
+  { name: 'reference not found', over: {}, tool: EXPLAIN('REF-NOPE'), message: (lang) => MESSAGE[lang].replace('REF-0001', 'REF-NOPE'), ref: 'REF-NOPE' },
+];
+
+for (const lang of ['en', 'fr']) {
+  for (const m of MATRIX) {
+    for (const o of HISTORY_OUTCOMES) {
+      test(`${o.name} ${m.name} in ${lang.toUpperCase()}: ${m.card ? 'a History card' : 'the human step, no mention of History'}, exactly one step`, async (t) => {
+        const { events } = await ask(t, {
+          rows: (a) => [status(a, o.over)], message: o.message?.(lang) ?? MESSAGE[lang], answer: 'unused', tool: o.tool, gating: m.gating, setup: m.setup,
+        });
+
+        const steps = nextSteps(events);
+        const reply = textOf(events);
+        assert.equal(steps.length, 1);
+        assert.ok(reply.endsWith(steps[0].text));
+        assert.equal(events.some((e) => e.type === 'action_card'), false, 'the card travels with the step');
+        if (m.card) {
+          assert.equal(steps[0].kind, 'history');
+          assert.deepEqual(steps[0].card, {
+            kind: 'navigate', target: 'history', path: '/history',
+            label: lang === 'en' ? 'History' : 'Historique',
+            button: lang === 'en' ? 'Click here to see your history' : 'Cliquez ici pour voir votre historique',
+          });
+          assert.match(steps[0].text, NEXT_TEXT.history[lang]);
+        } else {
+          assert.equal(steps[0].kind, 'human');
+          assert.equal(steps[0].card, undefined);
+          assert.match(steps[0].text, lang === 'en' ? /"Talk to a human agent"/ : /« Parler à un agent »/);
+          assert.match(steps[0].text, new RegExp(o.ref ?? 'REF-0001'));
+          assert.doesNotMatch(reply, /History|Historique/);
+          assert.equal(chipOf(events).prominent, false, 'a calm outcome stays calm; only the step changed');
+        }
+      });
+    }
+  }
+}
+
+test('when entitlements cannot be read the History step fails closed to the human step', async (t) => {
+  const { events } = await ask(t, { rows: PENDING, message: MESSAGE.en, answer: 'unused', gating: { usePackages: true, primaryConnect: true } });
+
+  assert.deepEqual(nextSteps(events).map((s) => s.kind), ['human']);
+  assert.doesNotMatch(textOf(events), /History/);
+});
+
+test('a numeric currency code from the bank is shown as XAF, as the portal does, and a letter code is kept', async (t) => {
+  for (const [dev, shown] of [['001', 'XAF'], ['59', 'XAF'], ['EUR', 'EUR']]) {
+    const { events } = await ask(t, { rows: (a) => [status(a, { sta: '01', msg: null, dev })], message: MESSAGE.en, answer: 'unused' });
+
+    assert.match(textOf(events), new RegExp(`Transfer REF-0001 \\(15000 ${shown},`));
+  }
 });

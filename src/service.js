@@ -401,12 +401,17 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     // Explain my failure: the transfer's status data and the failed-transfer guide only. Only a plain "failed"
     // record is worded by the model; every other outcome is fixed text. Whatever happens, the explanation ends
     // with exactly one next step, and a human next step makes the chip prominent.
-    const explain = async ({ result }, material) => {
+    const explain = async ({ result }, material, ent) => {
       const { outcome } = result;
       const { reference } = result; // as the customer typed it: the id they can see, not clientReferenceId
       const t = result.transaction;
       const d = result.detail;
       let next = OUTCOMES[outcome]?.next ?? null;
+      // The history step is the navigate card for History, so it follows the same package and connect rules. Where the
+      // page is not offered the step (and any wording that points to it) becomes the human one.
+      const historyPage = next === 'history' && navigation ? validateProposal(navigation, 'history', language, ent) : null;
+      const historyOpen = historyPage?.ok === true;
+      if (next === 'history' && !historyOpen) next = 'human';
       if (outcome !== 'not_found') {
         guideIds = [GUIDE_ID];
         send(res, 'guides', { guides: [{ id: GUIDE_ID, title: material.title }] });
@@ -416,7 +421,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
         next = nextTag === 'retry' ? 'retry' : 'human';
         if (next === 'human') chipReasons.push('contact_bank');
       } else {
-        const text = outcome === 'not_found' ? EXPLAIN_TEXT.not_found[language](reference) : EXPLAIN_TEXT[outcome][language](t, d);
+        const text = outcome === 'not_found' ? EXPLAIN_TEXT.not_found[language](reference) : EXPLAIN_TEXT[outcome][language](t, d, historyOpen);
         reply += text;
         send(res, 'delta', { text });
         if (OUTCOMES[outcome].chip) chipReasons.push(OUTCOMES[outcome].chip);
@@ -426,7 +431,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
       const text = `\n\n${NEXT_STEP[next][language](reference)}`;
       reply += text;
       send(res, 'delta', { text });
-      send(res, 'next_step', { kind: next, ...(next === 'history' ? { target: 'history' } : {}), text: text.trim() });
+      send(res, 'next_step', { kind: next, ...(historyOpen ? { target: 'history', card: historyPage.card } : {}), text: text.trim() });
     };
     try {
       if (guides) {
@@ -477,7 +482,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
             send(res, 'tool', { name: done.name, result: done.result, ...(done.display ? { display: done.display, language } : {}) });
             // A drafted case message about "that transfer" needs to know which one the customer was asking about.
             if (['transfer_status', 'explain_failure'].includes(done.name) && done.result.found) conversation.lastReference = done.result.transaction.reference;
-            if (done.name === 'explain_failure') await explain(done, guides.get(GUIDE_ID)[language]);
+            if (done.name === 'explain_failure') await explain(done, guides.get(GUIDE_ID)[language], ent);
             else await answer(dataMessages(masked, history, { tabled: Boolean(done.display) }), { known: referencesOf(done.result) });
             if (done.notice && !filtered) {
               const text = `\n\n${T1_MESSAGES[done.notice][language]}`;

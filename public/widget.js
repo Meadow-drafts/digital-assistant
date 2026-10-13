@@ -858,6 +858,9 @@ class BankAssistant extends HTMLElement {
           bubble.textContent += ev.text;
         } else if (ev.type === 'action_card') {
           this.addActionCard(ev);
+        } else if (ev.type === 'next_step') {
+          // The closing step is already in the reply text; when it is a page link it also comes as a validated card.
+          if (ev.card) this.addActionCard(ev.card);
         } else if (ev.type === 'warning') {
           this.addMessage('assistant', ev.text).dataset.role = 'warning';
         } else if (ev.type === 'refusal' || ev.type === 'blocked') {
