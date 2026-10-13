@@ -24,7 +24,11 @@ npm run eval -- --model qwen/qwen3.8-27b         # the whole EN/FR eval set thro
 npm run eval -- --model qwen/qwen3.8-27b --limit 2   # at most 2 new items this run (cheap check)
 ```
 
-`npm run eval` options: `--limit N` (items), `--lang en|fr`, `--items H1,T2`, `--fresh` (ignore earlier results), `--base-url` (default Groq; a local Ollama such as `http://localhost:11434/v1` needs no key). It paces itself to the Groq free plan (7,000 estimated tokens per minute, 950 requests per day), writes `eval/results/<model>.<lang>.json` and `.md` (pass rate, per-group rates, failing items with the lines that failed) after every item, and a repeat run resumes where it stopped. See `eval/items.js` for the 67 items and their expected-behaviour lines.
+Gemini (Google's OpenAI-compatible endpoint): `export GEMINI_API_KEY=...`, then pass the free-tier limits AI Studio shows for the model (the run refuses to start without all three):
+`npm run eval -- --base-url https://generativelanguage.googleapis.com/v1beta/openai --model gemini-3.8-flash --rpm <N> --tpm <N> --rpd <N> --limit 3`.
+For the service itself use `MODEL_PRIMARY_BASE_URL` (same URL) and `MODEL_PRIMARY_NAME`; the key is then read from `GEMINI_API_KEY`.
+
+`npm run eval` options: `--rpm/--tpm/--rpd` (provider limits, override the Groq defaults), `--limit N` (items), `--lang en|fr`, `--items H1,T2`, `--fresh` (ignore earlier results), `--base-url` (default Groq; a local Ollama such as `http://localhost:11434/v1` needs no key). It paces itself to the Groq free plan (7,000 estimated tokens per minute, 950 requests per day), writes `eval/results/<model>.<lang>.json` and `.md` (pass rate, per-group rates, failing items with the lines that failed) after every item, and a repeat run resumes where it stopped. See `eval/items.js` for the 67 items and their expected-behaviour lines.
 
 `npm test` uses fakes only (fake model, gateway, mailer, clock). It calls no model and no bank server and needs no key or token.
 

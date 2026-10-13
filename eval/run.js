@@ -1,13 +1,24 @@
 import { scoreItem } from './score.js';
 import { openResults } from './results.js';
+import { GEMINI_BASE_URL } from '../src/model.js';
 
 export const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
 const LANGS = ['en', 'fr'];
 
-const USAGE = 'Usage: npm run eval -- --model <name> [--limit N] [--lang en|fr] [--items H1,T2] [--fresh] [--base-url URL]';
+// The daily request count is kept per provider and model (Gemini's limits are per model, and another provider's calls
+// must not use them up). Groq keeps the original usage.json so its existing count carries on.
+export function usageFileName(baseUrl, model) {
+  if (baseUrl === GROQ_BASE_URL) return 'usage.json';
+  const part = (v) => v.replace(/^https?:\/\//, '').replace(/[^A-Za-z0-9.-]+/g, '_').replace(/^_+|_+$/g, '');
+  return `usage.${part(baseUrl)}.${part(model)}.json`;
+}
 
-// Reads the command line. The Groq key comes from the environment only (GROQ_API_KEY), never from an argument, and
-// is never put in an error message. A non-Groq base URL (a local Ollama) needs no key.
+const USAGE = 'Usage: npm run eval -- --model <name> [--limit N] [--lang en|fr] [--items H1,T2] [--fresh] [--base-url URL] [--rpm N --tpm N --rpd N]';
+
+// Reads the command line. Keys come from the environment only (GROQ_API_KEY, GEMINI_API_KEY), never from an argument,
+// and are never put in an error message. Another base URL (a local Ollama) needs no key. `--rpm/--tpm/--rpd` are the
+// provider's requests per minute, tokens per minute and requests per day; Gemini's free-tier numbers are only shown in
+// AI Studio, so a Gemini run refuses to start until all three are given.
 export function parseArgs(argv, env) {
   const o = { langs: LANGS, baseUrl: GROQ_BASE_URL, fresh: false };
   for (let i = 0; i < argv.length; i++) {
@@ -27,19 +38,28 @@ export function parseArgs(argv, env) {
       o.langs = [v];
     } else if (flag === '--items') o.only = value().split(',').map((s) => s.trim()).filter(Boolean);
     else if (flag === '--base-url') o.baseUrl = value();
-    else if (flag === '--fresh') o.fresh = true;
+    else if (['--rpm', '--tpm', '--rpd'].includes(flag)) {
+      const n = Number(value());
+      if (!Number.isInteger(n) || n < 1) throw new Error(`${flag} must be a whole number of 1 or more. ${USAGE}`);
+      o.limits = { ...o.limits, [{ '--rpm': 'requestsPerMinute', '--tpm': 'tokensPerMinute', '--rpd': 'requestsPerDay' }[flag]]: n };
+    } else if (flag === '--fresh') o.fresh = true;
     else throw new Error(`Unknown option ${flag}. ${USAGE}`);
   }
   if (!o.model) throw new Error(`--model is required. ${USAGE}`);
   if (o.baseUrl === GROQ_BASE_URL) {
     if (!env.GROQ_API_KEY) throw new Error('GROQ_API_KEY is not set. Export it in your shell (it is read from the environment only).');
     o.apiKey = env.GROQ_API_KEY;
+  } else if (o.baseUrl.replace(/\/$/, '') === GEMINI_BASE_URL) {
+    if (!env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY is not set. Export it in your shell (it is read from the environment only).');
+    o.apiKey = env.GEMINI_API_KEY;
+    const missing = ['requestsPerMinute', 'tokensPerMinute', 'requestsPerDay'].filter((k) => !o.limits?.[k]);
+    if (missing.length) throw new Error(`A Gemini run needs the free-tier limits shown in AI Studio: pass --rpm, --tpm and --rpd. ${USAGE}`);
   }
   return o;
 }
 
 const entryOf = (item, lang, turn, scored) => (scored.error
-  ? { group: item.group, prompt: item.prompts[lang], error: true }
+  ? { group: item.group, prompt: item.prompts[lang], error: true, reason: turn.reason ?? null }
   : {
     group: item.group,
     prompt: item.prompts[lang],
@@ -76,7 +96,7 @@ export async function runEval({ items, rig, dir, modelName, langs = LANGS, limit
       const scored = scoreItem(item, turn, lang);
       stores[lang].record(item.id, entryOf(item, lang, turn, scored));
       report.ran += 1;
-      log(`${item.id}.${lang}: ${scored.error ? 'ERROR' : scored.pass ? 'pass' : `FAIL (${scored.lines.filter((l) => !l.pass).length} line(s))`} ${turn.ms} ms`);
+      log(`${item.id}.${lang}: ${scored.error ? `ERROR${turn.reason ? ` (${turn.reason})` : ''}` : scored.pass ? 'pass' : `FAIL (${scored.lines.filter((l) => !l.pass).length} line(s))`} ${turn.ms} ms`);
     }
   }
   return report;

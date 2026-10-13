@@ -70,6 +70,7 @@ test('a model that fails is an error turn, not a failed one', async (t) => {
   const r = await rig(t, createFakeModel([new Error('provider returned 413')]));
   const turn = await r.run(item(), 'en');
   assert.equal(turn.error, true);
+  assert.match(turn.reason, /provider returned 413/);
 });
 
 test('many items in a row never hit the service rate limits', async (t) => {

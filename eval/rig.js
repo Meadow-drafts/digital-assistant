@@ -66,7 +66,15 @@ export async function createRig({ model }) {
   const customers = [alice, carol];
   // Everything the model is sent during the current turn, kept so a line can assert what it never saw.
   let sent = [];
-  const recording = { name: model.name, async *chat(request) { sent.push(request.messages); yield* model.chat(request); } };
+  // The service turns a model failure into a bare error event, so the reason is kept here to be shown by the runner.
+  let modelError = null;
+  const recording = {
+    name: model.name,
+    async *chat(request) {
+      sent.push(request.messages);
+      try { yield* model.chat(request); } catch (err) { modelError = String(err?.message ?? err).slice(0, 400); throw err; }
+    },
+  };
   const navigation = loadNavigation(NAVIGATION);
   const svc = await startService({
     model: recording,
@@ -101,6 +109,7 @@ export async function createRig({ model }) {
       const mode = item.session ?? 'locked';
       const c = mode === 'secondary' ? carol : alice;
       sent = [];
+      modelError = null;
       try {
         let conversationId = mode === 'none' ? undefined : await open(c, { unlock: mode === 'unlocked' });
         const say = (message) => chatTurn(svc.baseUrl, { message, conversationId, tenant: TENANT }, { token: c.token });
@@ -112,9 +121,9 @@ export async function createRig({ model }) {
         }
         const t0 = Date.now();
         const { status: httpStatus, events } = await say(message);
-        return turnOf(events, { modelInput: JSON.stringify(sent), ms: Date.now() - t0, status: httpStatus });
-      } catch {
-        return { ...turnOf([], { modelInput: '', ms: 0, status: 0 }), error: true };
+        return { ...turnOf(events, { modelInput: JSON.stringify(sent), ms: Date.now() - t0, status: httpStatus }), reason: modelError };
+      } catch (err) {
+        return { ...turnOf([], { modelInput: '', ms: 0, status: 0 }), error: true, reason: modelError ?? String(err?.message ?? err).slice(0, 400) };
       }
     },
     close: svc.close,

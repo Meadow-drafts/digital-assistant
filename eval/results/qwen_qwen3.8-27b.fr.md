@@ -1,7 +1,7 @@
 # Eval summary: qwen/qwen3.8-27b (fr)
 
-20 of 31 items passed (65%). 137 of 157 expected-behaviour lines held.
-4 item(s) errored (model or service unavailable) and are retried on the next run: R4, R5, R6, R7.
+23 of 34 items passed (68%). 149 of 169 expected-behaviour lines held.
+33 item(s) errored (model or service unavailable) and are retried on the next run: R4, R5, R6, R7, R2n, R3n, R4n, R6n, R1u, X1, X2, X3, X4, W1, W2, W3, W4, W5, W6, W7, S1, S2, S3, S4, P2, P3, P4, C1, C2, C3, C4, C5, C6.
 
 ## By group
 - how-to: 10 of 12 (83%)
@@ -9,7 +9,9 @@
 - do-it-for-me: 4 of 5 (80%)
 - injection: 3 of 4 (75%)
 - dispute: 0 of 2 (0%)
-- own-data: 1 of 4 (25%)
+- own-data: 2 of 5 (40%)
+- explain-failure: 1 of 1 (100%)
+- secret-in-chat: 1 of 1 (100%)
 
 ## Failing items
 

@@ -43,6 +43,24 @@ test('a 429 before any text waits and retries; it is not an error', async () => 
   assert.deepEqual(w.slept, [20_000]);
 });
 
+test('a 503 (provider overloaded) waits and retries too, and counts every attempt', async () => {
+  const w = world();
+  const usage = { day: null, count: 0 };
+  const pacer = createPacer({ tokensPerMinute: 8000, requestsPerDay: 100, rateLimitWaitMs: 20_000, usage, ...w });
+  const model = pacer.wrap(createFakeModel([new Error('provider returned 503: {"status":"UNAVAILABLE"}'), 'fine']));
+  assert.equal(await run(model), 'fine');
+  assert.deepEqual(w.slept, [20_000]);
+  assert.equal(usage.count, 2);
+});
+
+test('a status number inside another error body does not trigger a retry', async () => {
+  const w = world();
+  const pacer = createPacer({ tokensPerMinute: 8000, requestsPerDay: 100, ...w });
+  const model = pacer.wrap(createFakeModel([new Error('provider returned 400: quota 429 words')]));
+  await assert.rejects(run(model), /400/);
+  assert.deepEqual(w.slept, []);
+});
+
 test('other provider errors are passed on', async () => {
   const w = world();
   const pacer = createPacer({ tokensPerMinute: 8000, requestsPerDay: 100, ...w });
@@ -79,4 +97,16 @@ test('after the daily cap the pacer reports it was halted, so the runner can sto
   assert.equal(pacer.halted, null);
   await assert.rejects(run(model), DailyLimitError);
   assert.ok(pacer.halted instanceof DailyLimitError);
+});
+
+test('a requests-per-minute limit makes the next call wait for the window even when tokens fit', async () => {
+  const w = world();
+  const pacer = createPacer({ tokensPerMinute: 1_000_000, requestsPerMinute: 2, requestsPerDay: 100, ...w });
+  const model = pacer.wrap(createFakeModel(['ok']));
+  await run(model);
+  await run(model);
+  assert.deepEqual(w.slept, []);
+  await run(model);
+  assert.equal(w.slept.length, 1);
+  assert.ok(w.slept[0] > 55_000 && w.slept[0] <= 61_000, `slept ${w.slept[0]}`);
 });

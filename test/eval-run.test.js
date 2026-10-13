@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { parseArgs, runEval } from '../eval/run.js';
+import { parseArgs, runEval, usageFileName } from '../eval/run.js';
 import { createRig } from '../eval/rig.js';
 import { createPacer } from '../eval/pacer.js';
 import { cites } from '../eval/checks.js';
@@ -100,6 +100,18 @@ test('parseArgs: a local Ollama base URL needs no key', () => {
   assert.equal(o.apiKey, undefined);
 });
 
+const GEMINI = 'https://generativelanguage.googleapis.com/v1beta/openai';
+
+test('parseArgs: Gemini reads GEMINI_API_KEY only and refuses to start without the three limits', () => {
+  const limits = ['--rpm', '5', '--tpm', '250000', '--rpd', '100'];
+  const o = parseArgs(['--model', 'gemini-3.8-flash', '--base-url', GEMINI, ...limits], { GEMINI_API_KEY: 'g', GROQ_API_KEY: 'q' });
+  assert.equal(o.apiKey, 'g');
+  assert.deepEqual(o.limits, { requestsPerMinute: 5, tokensPerMinute: 250000, requestsPerDay: 100 });
+  assert.throws(() => parseArgs(['--model', 'm', '--base-url', GEMINI, ...limits], {}), /GEMINI_API_KEY is not set/);
+  assert.throws(() => parseArgs(['--model', 'm', '--base-url', GEMINI, '--rpm', '5'], { GEMINI_API_KEY: 'secret-g' }), (e) => /--rpm, --tpm and --rpd/.test(e.message) && !/secret-g/.test(e.message));
+  assert.throws(() => parseArgs(['--model', 'm', '--rpd', '0'], { GROQ_API_KEY: 'k' }), /--rpd/);
+});
+
 test('npm run eval is a separate command: not under test/, and it refuses to start without a model or a key', async () => {
   const { execFileSync } = await import('node:child_process');
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -110,4 +122,12 @@ test('npm run eval is a separate command: not under test/, and it refuses to sta
   const noKey = run(['--model', 'qwen/qwen3.8-27b'], {});
   assert.equal(noKey.code, 1);
   assert.match(noKey.err, /GROQ_API_KEY is not set/);
+});
+
+test('the daily request count is kept per provider and model; Groq keeps usage.json', () => {
+  assert.equal(usageFileName('https://api.groq.com/openai/v1', 'qwen/qwen3.8-27b'), 'usage.json');
+  const g = usageFileName('https://generativelanguage.googleapis.com/v1beta/openai', 'gemini-3.8-flash');
+  assert.notEqual(g, 'usage.json');
+  assert.notEqual(g, usageFileName('https://generativelanguage.googleapis.com/v1beta/openai', 'gemini-3.5-flash-lite'));
+  assert.match(g, /^usage\.[A-Za-z0-9._-]+\.json$/);
 });
