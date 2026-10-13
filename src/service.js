@@ -8,7 +8,7 @@ import { parseRefusal, refusalCard } from './refusals.js';
 import { BLOCKED, createOutputFilter } from './filter.js';
 import { chipState, cuesIn, parseEscalate, questionKey } from './chip.js';
 import { PROTECTED_TEXTS, modelHistory, UNSUPPORTED_ID, answerMessages, dataMessages, explainMessages, routerMessages } from './prompts.js';
-import { intentTool, isNavigationAsk } from './intents.js';
+import { asksForUnavailable, intentTool, isNavigationAsk } from './intents.js';
 import { prefillIntent, PREFILL_BY_RULE, NO_SESSION_FOR_FORM, asksToComplete } from './prefill-intent.js';
 import { offeredPages, parseNavigate, routeIdForPath, stepsOf, validateProposal } from './navigate.js';
 import { offeredForms, parsePrefill, validatePrefill } from './prefill.js';
@@ -68,7 +68,12 @@ async function collect(stream) {
 // use and returns the ids it needs. Anything not in the index is dropped.
 async function routeGuides({ model, language, available, guides, history, tools, retry = false }) {
   const index = available.map((g) => ({ id: g.id, title: g[language].title }));
-  if (guides.unsupported) index.push({ id: UNSUPPORTED_ID, title: 'Things the portal does not offer' });
+  // The title names each unavailable feature (the bold lead of every bullet in UNSUPPORTED.md), so the model can
+  // match "add a beneficiary" or "block my card" to it instead of to the nearest real guide.
+  if (guides.unsupported) {
+    const topics = [...guides.unsupported.matchAll(/^- \*\*(.+?)\.\*\*/gm)].map((m) => m[1]);
+    index.push({ id: UNSUPPORTED_ID, title: `Things the portal does not offer: ${topics.join('; ')}` });
+  }
   const raw = await collect(model.chat({ purpose: 'route', messages: routerMessages(index, history, { tools, retry }), language }));
   const routed = parseRefusal(raw);
   // The model's own tool tag (with its arguments) wins. A plain own-data question (balance, recent transactions,
@@ -79,6 +84,8 @@ async function routeGuides({ model, language, available, guides, history, tools,
   const tool = modelTool ?? intentTool(history.at(-1)?.content);
   if (tool) return { picks: [], refusal: null, tool, toolSource: modelTool ? 'model' : 'rules' };
   if (routed.category) return { picks: [], refusal: routed.category };
+  // Features the portal does not offer are decided by rules too: the model kept picking the nearest real guide.
+  if (guides.unsupported && asksForUnavailable(history.at(-1)?.content)) return { picks: [UNSUPPORTED_ID], refusal: null };
   let picks = [];
   try { picks = JSON.parse(/\[[\s\S]*?\]/.exec(raw)?.[0] ?? '[]'); } catch { /* unparseable means no guide */ }
   const allowed = new Set(index.map((i) => i.id));
@@ -512,9 +519,11 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
             // The customer's own history is read at most once per turn, and only if a pre-fill check needs it.
             let ownRows;
             const prefillHistory = () => (ownRows ??= t1 ? t1.ownHistory(conversation, tokenOf(req), ent) : Promise.resolve(null));
-            const forms = navigation && prefill ? offeredForms(prefill, navigation, language, ent) : [];
-            await answer(answerMessages(material, picks.includes(UNSUPPORTED_ID) ? guides.unsupported : '', history, navigation ? offeredPages(navigation, language, ent) : [], forms), {
-              navigate: navigation ? { fallback: stepsOf(material[0]?.text ?? ''), entitlements: ent, guided: used.length > 0, guideRoutes: used.map((g) => g.route).filter(Boolean), prefill: { conversation, history: prefillHistory } } : null,
+            // An answer from the unsupported list has no task page: the model is offered no links and none can be drawn.
+            const linkable = navigation && used.length > 0;
+            const forms = linkable && prefill ? offeredForms(prefill, navigation, language, ent) : [];
+            await answer(answerMessages(material, picks.includes(UNSUPPORTED_ID) ? guides.unsupported : '', history, linkable ? offeredPages(navigation, language, ent) : [], forms), {
+              navigate: linkable ? { fallback: stepsOf(material[0]?.text ?? ''), entitlements: ent, guided: used.length > 0, guideRoutes: used.map((g) => g.route).filter(Boolean), prefill: { conversation, history: prefillHistory } } : null,
             });
             const closing = used.find((g) => g[language].closing)?.[language].closing;
             if (!refusal && !filtered) {

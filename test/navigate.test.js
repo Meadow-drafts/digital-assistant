@@ -182,3 +182,12 @@ test('no card comes with a blocked or refused reply', async (t) => {
   assert.equal(refused.events.find((e) => e.type === 'refusal').category, 'execute');
   assert.doesNotMatch(replyOf(refused.events), /\[\[/);
 });
+
+test('an answer from the unsupported list offers no page link, even when the model proposes one', async (t) => {
+  for (const message of ['block my card', 'Add a beneficiary']) {
+    const { events } = await ask(t, { message, picks: [], answer: '[[navigate:transfer]]The portal cannot do that.' });
+
+    assert.deepEqual(cardsOf(events), [], message);
+    assert.match(replyOf(events), /^The portal cannot do that\./, message);
+  }
+});

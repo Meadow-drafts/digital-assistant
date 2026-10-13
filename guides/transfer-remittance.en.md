@@ -8,7 +8,7 @@ verified-on: DRAFT 2026-10-12, code read only, owner to validate
 # Send an outgoing remittance (money to someone who may not have an account)
 
 ## When to use
-You want to send money to a person identified by account, wallet, card or voucher, with their identity details.
+You want to send money to a person identified by account, wallet, card or voucher, with their identity details. This is also how to send money to another country, including elsewhere in the CEMAC region.
 
 ## Steps
 1. Open **Transfers**, tab **Outgoing Remittance**.

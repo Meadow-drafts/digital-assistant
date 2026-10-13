@@ -8,7 +8,7 @@ verified-on: DRAFT 2026-10-12, code read only, owner to validate
 # Effectuer un envoi sortant (remittance)
 
 ## Quand l'utiliser
-Vous voulez envoyer de l'argent à une personne identifiée par compte, wallet, carte ou voucher, avec ses informations d'identité.
+Vous voulez envoyer de l'argent à une personne identifiée par compte, wallet, carte ou voucher, avec ses informations d'identité. C'est aussi ainsi que l'on envoie de l'argent vers un autre pays, y compris ailleurs dans la zone CEMAC.
 
 ## Étapes
 1. Ouvrez **Transfert**, onglet **Remittance sortante**.

@@ -38,3 +38,20 @@ export function intentTool(text) {
   if (FEES.test(t)) return { name: 'fees_limits', rawArgs: '{}' };
   return null;
 }
+
+// Questions about features the portal does not offer (the topics of guides/UNSUPPORTED.md), in EN and FR. The router
+// model tends to pick the nearest real guide for these ("add a beneficiary" -> single transfer), so rules decide.
+// Narrow on purpose: Outgoing Remittance, GIMAC and the Cards view are supported, so "abroad" and plain "card" do not match.
+const CARD_ACTION = /\b(block\w*|unblock\w*|bloqu\w*|debloqu\w*|lost|stolen|perdu\w*|vole\w*|opposition|replac\w*|remplac\w*|limits?|plafonds?|request|order|commander|demander)\b/;
+const UNAVAILABLE = [
+  /\b(beneficiar\w*|beneficiaire\w*)\b/,
+  /\binternational\w*\b.*\b(transfers?|transferts?|virements?)\b|\b(transfers?|transferts?|virements?)\b.*\binternational/,
+  /\b(forgot\w*|oubli\w*)\b.*\b(password|mot de passe|pin)\b|\b(reset|reinitialis\w*)\b.*\b(password|mot de passe)\b/,
+  /\b(forfaits?|bundles?)\b/,
+];
+
+export function asksForUnavailable(text) {
+  if (typeof text !== 'string') return false;
+  const t = norm(text);
+  return UNAVAILABLE.some((r) => r.test(t)) || (/\b(cards?|cartes?)\b/.test(t) && CARD_ACTION.test(t));
+}
