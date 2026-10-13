@@ -73,9 +73,9 @@ function renderContext(d) {
   $('priority').hidden = !d.priority;
   $('draft').hidden = !d.draft;
   $('draft-text').textContent = d.draft ?? '';
-  $('summary').hidden = !d.summary;
+  $('summary').hidden = !d.summary && !d.summaryUnavailable;
   $('summary-label').textContent = d.summary?.label ?? '';
-  $('summary-text').textContent = d.summary?.text ?? '';
+  $('summary-text').textContent = d.summary?.text ?? (d.summaryUnavailable ? 'No summary available' : '');
   $('records-box').hidden = !d.records?.length;
   $('records').replaceChildren(...(d.records ?? []).map((r) => {
     const line = document.createElement('div');

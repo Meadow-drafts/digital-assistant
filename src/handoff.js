@@ -364,6 +364,7 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
       ...row(c, agent), conversationId: c.conversationId, linkedTo: c.linkedTo,
       colleagues: agents.list.filter((a) => a.id !== agent.id).map(({ id, name }) => ({ id, name })), draft: c.draft ?? null,
       summary: c.summary ? { text: c.summary.text, label: SUMMARY_LABEL[c.language], regenerated: c.summary.regenerated } : null,
+      summaryUnavailable: !c.summary,
       records: c.records ?? null,
       transcript: c.transcript.map(({ seq, from, text, at }) => ({ seq, from, text, at })) });
   }

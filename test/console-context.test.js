@@ -131,7 +131,22 @@ test('if the model cannot write a summary the case still opens, with no summary 
 
   assert.equal(status, 200);
   assert.equal(body.summary, null);
+  assert.equal(body.summaryUnavailable, true);
   assert.ok(body.transcript.length >= 2);
+});
+
+test('when no summary could be written the console says "No summary available" and the case still works', async (t) => {
+  const m = createFakeModel((request) => (request.purpose === 'summary' ? new Error('429 tokens per day') : request.purpose === 'route' ? '[]' : 'ok'));
+  const { svc, open } = await handoff(t, { m });
+  const { body: { ref } } = await open();
+  const w = await consolePage(svc, t, 'aline', `/console?case=${ref}`);
+  await w.until(() => w.q('detail-ref')?.textContent.includes(ref));
+
+  w.q('claim').click();
+  await w.until(() => !w.q('reply-send').disabled);
+
+  assert.equal(w.q('summary').hidden, false);
+  assert.match(w.q('summary-text').textContent, /No summary available/);
 });
 
 // ---- Priority: wrong-transfer cases ----

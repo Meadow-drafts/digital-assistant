@@ -108,7 +108,8 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
   const checkOutput = createOutputFilter({ allowlist: outputAllowlist, protectedTexts: PROTECTED_TEXTS });
   const conversations = new Map();
   const handoff = createHandoff({
-    clock, audit, mailer, agents, support, consoleUrl, conversations, model,
+    clock, audit, mailer, agents, support, consoleUrl, conversations,
+    model: model && limiter.track(model), // agent summaries spend the same global token budget
     recordsFor: async ({ conversation, req, tenant }) => (t1 && req ? t1.recentMasked(conversation, tokenOf(req), await entitlementsFor(req, tenant, conversation)) : null),
   });
 
@@ -567,6 +568,8 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
       latencyMs: clock.now() - startedAt,
       outcome: limited ? 'limited' : filtered ? 'filtered' : outcome,
       ...(limited ? { limit: limited } : {}),
+      // A turn is admitted under the daily budget and runs to its end; when its own calls took the total over, say by how much.
+      ...(limiter.dailyTokens() > limiter.cfg.tokensPerDay ? { tokenOvershoot: limiter.dailyTokens() - limiter.cfg.tokensPerDay } : {}),
       ...(filtered ? { filter: filtered } : {}),
       ...(refusal ? { refusalCategory: refusal } : {}),
       ...(scam.length ? { scamCues: scam } : {}),
