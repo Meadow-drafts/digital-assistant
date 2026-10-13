@@ -30,6 +30,7 @@ function signOut() {
   canReadAudit = false;
   try { sessionStorage.removeItem('console:token'); sessionStorage.removeItem('console:name'); sessionStorage.removeItem('console:audit'); } catch { /* nothing stored */ }
   $('audit-panel').hidden = true;
+  $('dashboard-panel').hidden = true;
   $('console').hidden = true;
   $('login-form').hidden = false;
 }
@@ -38,6 +39,7 @@ function showConsole() {
   $('login-form').hidden = true;
   $('console').hidden = false;
   $('agent-name').textContent = me ?? '';
+  $('dashboard-open').hidden = !canReadAudit;
   $('audit-open').hidden = !canReadAudit; // the service enforces it; this only keeps the button away from staff who cannot use it
   refresh();
 }
@@ -203,9 +205,40 @@ async function exportAudit(format) {
 }
 $('audit-export-csv').addEventListener('click', () => exportAudit('csv'));
 $('audit-export-json').addEventListener('click', () => exportAudit('json'));
-$('audit-open').addEventListener('click', () => { $('audit-panel').hidden = false; loadAudit(); });
+$('audit-open').addEventListener('click', () => { $('dashboard-panel').hidden = true; $('audit-panel').hidden = false; loadAudit(); });
 $('audit-close').addEventListener('click', () => { $('audit-panel').hidden = true; });
 $('audit-form').addEventListener('submit', (e) => { e.preventDefault(); loadAudit(); });
+
+// Staff dashboard (same staff as the audit log). Counts and percentages, set as text; the service sends no personal data.
+const figureText = (f) => (f.percent === null ? `0 of ${f.of}` : `${f.count} of ${f.of} (${f.percent}%)`);
+function rows(into, items, label) {
+  into.replaceChildren(...items.map((item) => {
+    const row = document.createElement('div');
+    row.textContent = label(item);
+    return row;
+  }));
+  if (!items.length) into.textContent = 'Nothing in this range.';
+}
+async function loadDashboard() {
+  $('dashboard-error').textContent = '';
+  const query = new URLSearchParams();
+  for (const [name, role] of [['from', 'dashboard-from'], ['to', 'dashboard-to'], ['language', 'dashboard-language']]) {
+    if ($(role).value.trim()) query.set(name, $(role).value.trim());
+  }
+  const res = await api('GET', `/agent/dashboard${query.size ? `?${query}` : ''}`);
+  if (!res.ok) { $('dashboard-error').textContent = res.status === 403 ? 'You are not authorised to read the dashboard.' : 'Could not load the dashboard.'; return; }
+  const d = res.body;
+  $('dashboard-conversations').textContent = String(d.conversations.count);
+  $('dashboard-handoff').textContent = figureText(d.handoffRate);
+  $('dashboard-resolved').textContent = figureText(d.assistantResolved);
+  $('dashboard-note').textContent = d.conversations.small ? `Small number: these figures come from fewer than ${d.smallNumberBelow} conversations, so read them with care.` : '';
+  const small = (item) => (item.small ? ` (fewer than ${d.smallNumberBelow} conversations)` : '');
+  rows($('dashboard-top'), d.topQuestions, (q) => `${q.kind} ${q.id}: ${q.turns} questions in ${q.conversations} conversations${small(q)}`);
+  rows($('dashboard-unresolved'), d.unresolved, (u) => `${u.text} [${u.language}]: ${u.count} times in ${u.conversations} conversations${small(u)}`);
+}
+$('dashboard-open').addEventListener('click', () => { $('audit-panel').hidden = true; $('dashboard-panel').hidden = false; loadDashboard(); });
+$('dashboard-close').addEventListener('click', () => { $('dashboard-panel').hidden = true; });
+$('dashboard-form').addEventListener('submit', (e) => { e.preventDefault(); loadDashboard(); });
 
 $('claim').addEventListener('click', async () => {
   $('claim-error').textContent = '';

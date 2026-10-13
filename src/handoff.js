@@ -6,6 +6,7 @@ import { json, readJson } from './http.js';
 import { maskText } from './mask.js';
 import { ownerOf, tokenOf } from './identity.js';
 import { cuesIn } from './chip.js';
+import { computeDashboard } from './dashboard.js';
 import { SUMMARY_LABEL, createSummarizer } from './summary.js';
 
 // Fixed customer-facing text. The customer is told when to expect an update, never that it will be resolved.
@@ -48,7 +49,7 @@ const CUSTOMER_MAIL = {
 };
 
 // Customer and agent routes for handoff cases. Returns true when it served the request.
-export function createHandoff({ clock, audit, mailer, agents, support, consoleUrl, conversations, model, recordsFor }) {
+export function createHandoff({ clock, audit, failedQuestions, mailer, agents, support, consoleUrl, conversations, model, recordsFor }) {
   const summarize = createSummarizer({ model });
   const store = createCaseStore({ clock });
   const { timers } = support;
@@ -533,6 +534,23 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
     json(res, 200, { ref, state: 'with_agent', claimedBy: agent.name });
   }
 
+  // Staff dashboard (ticket 46): figures for a date range and language, computed from the audit log and the
+  // failed-question log only. Same authorisation as the audit reader. Read only; nothing is written to the audit log.
+  async function dashboard(req, res, url) {
+    const agent = agentOf(req, res);
+    if (!agent) return;
+    if (req.method !== 'GET') { json(res, 405, { error: 'read_only' }); return; }
+    if (!canReadAudit(agent)) { json(res, 403, { error: 'not_authorised' }); return; }
+    const language = url.searchParams.get('language') || 'all';
+    if (!['all', 'en', 'fr'].includes(language)) { json(res, 400, { error: 'bad_language' }); return; }
+    const parsed = auditFilter(url);
+    if (parsed.error) { json(res, 400, { error: parsed.error }); return; }
+    const { fromMs = -Infinity, toMs = Infinity } = parsed.query;
+    const records = await audit.read({ fromMs, toMs, limit: Infinity });
+    const failed = ((await failedQuestions?.all?.()) ?? []).filter((f) => { const at = Date.parse(f.time); return at >= fromMs && at <= toMs; });
+    json(res, 200, { range: { from: parsed.filter.from, to: parsed.filter.to }, ...computeDashboard({ records, failedQuestions: failed, language }) });
+  }
+
   async function handle(req, res) {
     const url = new URL(req.url, 'http://local');
     if (req.method === 'POST' && url.pathname === '/handoff') { await openHandoff(req, res); return true; }
@@ -540,6 +558,7 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
     if (req.method === 'POST' && url.pathname === '/case/cancel') { await cancelCase(req, res); return true; }
     if (req.method === 'POST' && url.pathname === '/case/feedback') { await solvedFeedback(req, res); return true; }
     if (req.method === 'POST' && url.pathname === '/agent/login') { await agentLogin(req, res); return true; }
+    if (url.pathname === '/agent/dashboard') { await dashboard(req, res, url); return true; }
     if (url.pathname === '/agent/audit/export') { await auditExport(req, res, url); return true; }
     if (url.pathname === '/agent/audit') { await auditView(req, res, url); return true; }
     if (req.method === 'GET' && url.pathname === '/agent/cases') { agentCases(req, res); return true; }

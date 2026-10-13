@@ -52,7 +52,30 @@
   </form>
 
   <div data-role="console" hidden>
-    <p class="note"><span data-role="agent-name"></span> · <button data-role="audit-open" type="button" hidden>Audit log</button> <button data-role="logout" type="button">Sign out</button></p>
+    <p class="note"><span data-role="agent-name"></span> · <button data-role="audit-open" type="button" hidden>Audit log</button> <button data-role="dashboard-open" type="button" hidden>Dashboard</button> <button data-role="logout" type="button">Sign out</button></p>
+    <section class="card" data-role="dashboard-panel" hidden style="margin-bottom: 1rem">
+      <h2>Dashboard (counts from the audit and failed-question logs; no personal data)</h2>
+      <form data-role="dashboard-form" class="row">
+        <input data-role="dashboard-from" type="date" aria-label="From date" />
+        <input data-role="dashboard-to" type="date" aria-label="To date" />
+        <select data-role="dashboard-language" aria-label="Language">
+          <option value="all">All languages</option>
+          <option value="en">English</option>
+          <option value="fr">French</option>
+        </select>
+        <button type="submit">Show</button>
+        <button data-role="dashboard-close" type="button">Close</button>
+      </form>
+      <p class="error" data-role="dashboard-error" role="alert"></p>
+      <p class="note" data-role="dashboard-note"></p>
+      <p>Conversations: <b data-role="dashboard-conversations"></b></p>
+      <p>Handoff rate (conversations that opened a handoff): <b data-role="dashboard-handoff"></b></p>
+      <p>Assistant-resolved (no handoff, and not ended in a refusal or "no verified steps"): <b data-role="dashboard-resolved"></b></p>
+      <h3>Top questions (by the guide or tool that answered)</h3>
+      <div data-role="dashboard-top"></div>
+      <h3>Unresolved topics (failed questions, masked)</h3>
+      <div data-role="dashboard-unresolved"></div>
+    </section>
     <section class="card" data-role="audit-panel" hidden style="margin-bottom: 1rem">
       <h2>Audit log (read only, newest first)</h2>
       <form data-role="audit-form" class="row">

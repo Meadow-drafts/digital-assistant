@@ -18,7 +18,7 @@ import { ownerOf, subjectOf, tokenOf } from './identity.js';
 import { readJson } from './http.js';
 import { createHandoff } from './handoff.js';
 import { createDrafts } from './draft.js';
-import { createAuditTrail } from './audit.js';
+import { createAuditTrail, createFailedQuestionTrail } from './audit.js';
 import { createRetention } from './retention.js';
 
 const PUBLIC = new URL('../public/', import.meta.url);
@@ -103,12 +103,14 @@ const referencesOf = (result) => [result?.transaction?.reference, ...(result?.tr
 export function createService({ allowedOrigins = [], devPage, model, gateway, clock, audit: auditSink, guides, navigation, prefill, scamCues, entitlements, failedQuestions, outputAllowlist, limits, mailer, agents, support, consoleUrl, retention }) {
   // Every audit record goes through the trail: complete fields, nothing secret-shaped stored.
   const audit = createAuditTrail({ sink: auditSink, clock });
+  // Failed questions are stored masked and cut short, through one write point (the sink itself stays for the dashboard and the retention job).
+  const failedTrail = failedQuestions ? createFailedQuestionTrail({ sink: failedQuestions }) : null;
   const t1 = gateway ? createT1({ gateway, clock }) : null;
   const limiter = createLimiter({ clock, limits });
   const checkOutput = createOutputFilter({ allowlist: outputAllowlist, protectedTexts: PROTECTED_TEXTS });
   const conversations = new Map();
   const handoff = createHandoff({
-    clock, audit, mailer, agents, support, consoleUrl, conversations,
+    clock, audit, failedQuestions, mailer, agents, support, consoleUrl, conversations,
     model: model && limiter.track(model), // agent summaries spend the same global token budget
     recordsFor: async ({ conversation, req, tenant }) => (t1 && req ? t1.recentMasked(conversation, tokenOf(req), await entitlementsFor(req, tenant, conversation)) : null),
   });
@@ -514,7 +516,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
             chipReasons.push('no_guide_hit');
             reply += NO_VERIFIED_STEPS[language];
             send(res, 'delta', { text: NO_VERIFIED_STEPS[language] });
-            await failedQuestions?.append({ time: new Date(clock.now()).toISOString(), conversationId, tenant: body.tenant ?? null, language, question: message });
+            await failedTrail?.append({ time: new Date(clock.now()).toISOString(), conversationId, tenant: body.tenant ?? null, language, question: message });
           } else {
             const material = picks.map((id) => guides.get(id)?.[language] ?? null).filter(Boolean);
             // The customer's own history is read at most once per turn, and only if a pre-fill check needs it.

@@ -44,7 +44,7 @@ const JWT = /\beyJ[\w-]{4,}\.[\w-]{4,}\.[\w-]*/g;
 const BEARER = /\bBearer\s+\S+/gi;
 const LONG_HEX = /\b[0-9a-f]{40,}\b/gi; // a PIN hash (SHA-512) or any digest
 const scrubString = (s) => s.replace(JWT, PLACEHOLDER).replace(BEARER, `Bearer ${PLACEHOLDER}`).replace(LONG_HEX, PLACEHOLDER).replace(CARD, PLACEHOLDER);
-const scrub = (value) => {
+export const scrub = (value) => {
   if (typeof value === 'string') return scrubString(value);
   if (Array.isArray(value)) return value.map(scrub);
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, scrub(v)]));
@@ -78,5 +78,22 @@ export function createAuditTrail({ sink, clock }) {
       return records.reverse().slice(0, limit);
     },
     purge: (beforeMs) => sink.purge(beforeMs),
+  };
+}
+
+// Free text from a customer that is stored for staff to read (the failed-question log): through the shield again,
+// long numbers masked to their last four, tokens, hashes, card numbers and emails removed, then cut short.
+const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
+export function safeFreeText(text, max) {
+  const clean = scrub(maskText(shield(String(text ?? '')).text)).replace(EMAIL, '[email]').replace(/\s+/g, ' ').trim();
+  return clean.length > max ? `${clean.slice(0, max)}…` : clean;
+}
+
+// The one write point of the failed-question log, like the audit trail is for the audit: the question is stored masked
+// and cut at STORED_QUESTION_MAX. Other fields are the conversation id, tenant, language and time.
+export const STORED_QUESTION_MAX = 200;
+export function createFailedQuestionTrail({ sink }) {
+  return {
+    append: ({ question, ...rest }) => sink.append({ ...rest, question: safeFreeText(question, STORED_QUESTION_MAX) }),
   };
 }
