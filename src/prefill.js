@@ -25,6 +25,10 @@ export function parseRegistry(config, navigation) {
     if (!/^[a-z_]{1,32}$/.test(id)) fail(id, 'form ids are lowercase words');
     if (!navigation.routes.has(form?.route)) fail(id, 'route must be a page from the navigate config');
     if (!bilingual(form.summary)) fail(id, 'summary is needed in English and French');
+    if (form.directions !== undefined && !bilingual(form.directions)) fail(id, 'directions need text in English and French');
+    if (form.mode !== undefined && !['fill', 'directions'].includes(form.mode)) fail(id, 'mode is "fill" or "directions"');
+    if (form.mode === 'directions' && !bilingual(form.directions)) fail(id, 'directions mode needs directions text in English and French');
+    if (form.waitSeconds !== undefined && !(Number.isInteger(form.waitSeconds) && form.waitSeconds >= 1 && form.waitSeconds <= 300)) fail(id, 'waitSeconds is a whole number from 1 to 300');
     const checks = form.checks ?? [];
     if (!Array.isArray(checks) || checks.some((c) => !CHECKS.has(c))) fail(id, 'unknown check');
     const fields = new Map();
@@ -39,7 +43,7 @@ export function parseRegistry(config, navigation) {
       fields.set(name, { name, type: field.type, dom: field.dom, max: field.max ?? 100, label: field.label });
     }
     if (fields.size === 0) fail(id, 'a form needs fields');
-    forms.set(id, { id, route: form.route, summary: form.summary, checks, fields });
+    forms.set(id, { id, route: form.route, summary: form.summary, directions: form.directions ?? null, mode: form.mode ?? 'fill', waitSeconds: form.waitSeconds ?? null, checks, fields });
   }
   return { forms, currencies, doubleCheck: dc };
 }
@@ -247,6 +251,10 @@ export async function validatePrefill({ registry, navigation, proposal, language
     beneficiary: beneficiaryField ? values.get(beneficiaryField).display : null,
     amount: amount ? { value: amount.number, currency } : null,
     doubleCheck: doubleCheck ? cfg.text[language] ?? cfg.text.en : null,
+    // Fixed text from the config, for a form behind several choices; and how long the widget waits for its inputs.
+    directions: form.directions ? form.directions[language] ?? form.directions.en : null,
+    mode: form.mode,
+    waitMs: form.waitSeconds ? form.waitSeconds * 1000 : null,
     button: page.card.button,
     fields,
   };

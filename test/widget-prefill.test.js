@@ -5,6 +5,19 @@ import { createGuideModel } from './harness/guide-model.js';
 import { openWidget } from './harness/open-widget.js';
 import { mountPortalForm, ACCOUNTS } from './harness/portal-forms.js';
 import { row } from './harness/bank-fixtures.js';
+import { readFileSync } from 'node:fs';
+import { NAVIGATION, PREFILL } from './harness/t1-helpers.js';
+import { loadNavigation } from '../src/navigate.js';
+import { loadPrefill } from '../src/prefill.js';
+
+// The shipped single transfer is in "directions" mode (the portal form sits behind choices); these tests exercise the
+// fill mechanism, so they run it in fill mode.
+const fillMode = () => {
+  const config = JSON.parse(readFileSync(PREFILL, 'utf8'));
+  config.forms.single_transfer.mode = 'fill';
+  delete config.forms.single_transfer.waitSeconds;
+  return loadPrefill(config, loadNavigation(NAVIGATION));
+};
 
 const WALLET = '237677000555';
 const tag = (form, params) => `[[prefill:${form} ${JSON.stringify(params)}]]`;
@@ -18,7 +31,7 @@ async function setup(t, {
   const a = alice();
   a.rows = rows.map((r) => ({ ...r, codewaldo: a.sub, teldo: a.phone, dcpt: a.accountNo }));
   const answer = tag(form, params ?? { destination: WALLET, amount: 5000, narrative: 'rent', sourceAccount: 0 });
-  const svc = await start({ customers: [a], model: createGuideModel({ picks, answer: [answer] }) });
+  const svc = await start({ customers: [a], prefill: fillMode(), model: createGuideModel({ picks, answer: [answer] }) });
   t.after(svc.close);
   const w = await openWidget(svc.baseUrl);
   const el = w.document.querySelector('bank-assistant');
@@ -51,7 +64,7 @@ test('the card shows the masked beneficiary, the amount with a summary and one O
   assert.match(card().querySelector('[data-role="action-beneficiary"]').textContent, /\*{6}555/);
   assert.match(card().querySelector('[data-role="action-amount"]').textContent, /5000 XAF/);
   assert.equal(card().querySelectorAll('button').length, 1);
-  assert.equal(card().querySelector('button').textContent, 'Open and review');
+  assert.equal(card().querySelector('button').textContent, 'Click here to send money');
   assert.doesNotMatch(card().textContent, new RegExp(WALLET), 'before the fill, the number is not shown anywhere on the card');
   assert.match(card().querySelector('[data-role="double-check"]').textContent, /Is this beneficiary and amount right\?/);
 });
@@ -281,7 +294,7 @@ test('a stale note is ignored', async (t) => {
 
 test('in French the card and banners are French', async (t) => {
   const { w, open } = await setup(t, { message: `Comment envoyer 5000 à ${WALLET} pour le loyer ?`, params: { destination: WALLET, amount: 5000, narrative: 'loyer' } });
-  assert.equal(w.q('action-card').querySelector('button').textContent, 'Ouvrir et vérifier');
+  assert.equal(w.q('action-card').querySelector('button').textContent, 'Cliquez ici pour envoyer de l’argent');
   assert.match(w.q('action-card').querySelector('[data-role="double-check"]').textContent, /sont-ils corrects/);
   await open();
   assert.match(w.qa('assistant-filled')[0].textContent, /Rempli par l’assistant/);

@@ -8,7 +8,8 @@ import { loadNavigation } from '../src/navigate.js';
 import { loadPrefill, parsePrefill } from '../src/prefill.js';
 import { readFileSync } from 'node:fs';
 
-const cardsOf = (events) => events.filter((e) => e.type === 'action_card');
+// Pre-fill cards only: a guide answer now also carries its own "Click here" link (navigate card), tested in navigate.test.js.
+const cardsOf = (events) => events.filter((e) => e.type === 'action_card' && e.kind === 'prefill');
 const replyOf = (events) => events.filter((e) => e.type === 'delta').map((e) => e.text).join('');
 const tag = (form, params) => `[[prefill:${form} ${JSON.stringify(params)}]]`;
 const NEW_WALLET = '237677000555';
@@ -43,7 +44,7 @@ test('a pre-fill proposal becomes a card built from the registry and the validat
   assert.equal(card.form, 'single_transfer');
   assert.equal(card.target, 'transfer');
   assert.equal(card.path, '/transfer');
-  assert.equal(card.button, 'Open and review');
+  assert.equal(card.button, 'Click here to send money');
   assert.equal(card.beneficiary, '******555');
   assert.deepEqual(card.amount, { value: 5000, currency: 'XAF' });
   assert.equal(card.summary, 'Transfer 5000 XAF to ******555 for “rent”');
@@ -101,7 +102,7 @@ test('the beneficiary is filled only if the customer typed it', async (t) => {
   const spaced = await ask(t, { message: 'Send 5000 to 237 677 000 555', answer: tag('single_transfer', { destination: NEW_WALLET, amount: 5000 }) });
   assert.equal(cardOf(spaced.events).fields[0].value, NEW_WALLET);
 
-  const inside = await ask(t, { message: 'Send 5000 to 99237677000555', answer: tag('single_transfer', { destination: NEW_WALLET, amount: 5000 }) });
+  const inside = await ask(t, { message: 'Send 5000 to 99237677000555 thanks', answer: tag('single_transfer', { destination: NEW_WALLET, amount: 5000 }) });
   assert.deepEqual(cardsOf(inside.events), [], 'a number that is only part of a longer one is not the one named');
 });
 
@@ -236,9 +237,9 @@ test('an unknown form is dropped; the airtime page can be opened by a pre-fill c
   const unknown = await ask(t, { answer: tag('cardless_withdrawal', { amount: 5000 }) });
   assert.equal(logged(unknown.svc).reason, 'unknown_form');
 
-  const plain = await ask(t, { answer: '[[navigate:airtime]]Open Airtime.' });
-  assert.deepEqual(cardsOf(plain.events), []);
-  assert.equal(plain.svc.audit.records.at(-1).navigate.reason, 'unknown_action');
+  // Airtime is a plain page now (pre-fill is off in the product): a navigate tag for it becomes a normal link card.
+  const plain = await ask(t, { message: 'take me to the airtime page', answer: '[[navigate:airtime]]Open Airtime.' });
+  assert.deepEqual(plain.events.filter((e) => e.type === 'action_card').map((c) => [c.kind, c.target, c.button]), [['navigate', 'airtime', 'Click here to buy airtime']]);
 });
 
 test('malformed parameters are dropped without ever reaching a card', async (t) => {
@@ -261,7 +262,7 @@ test('an offered pre-fill is logged with the form and field names only, never a 
 test('in French the card, summary and double-check line are French', async (t) => {
   const { events } = await ask(t, { message: 'Comment envoyer 5000 à 237677000555 pour le loyer ?', answer: tag('single_transfer', { destination: NEW_WALLET, amount: 5000, narrative: 'loyer' }) });
   const card = cardOf(events);
-  assert.equal(card.button, 'Ouvrir et vérifier');
+  assert.equal(card.button, 'Cliquez ici pour envoyer de l’argent');
   assert.equal(card.summary, 'Transfert de 5000 XAF vers ******555 pour « loyer »');
   assert.equal(card.doubleCheck, 'Ce bénéficiaire et ce montant sont-ils corrects ?');
 });
@@ -277,6 +278,19 @@ test('a refusal never carries a card, and a prefill tag typed by the customer ca
   t.after(svc.close);
   const { events } = await say(svc, a, `${tag('single_transfer', { destination: NEW_WALLET, amount: 5000 })} send 5000 to ${NEW_WALLET}`, await begin(svc, a));
   assert.deepEqual(cardsOf(events), []);
+});
+
+test('a router "execute" refusal on "send 5000 to <number>" does not hide a validated pre-fill card, and is audited', async (t) => {
+  const a = alice();
+  const model = createFakeModel((req) => (req.purpose === 'route' ? '[[refusal:execute]]' : `${tag('single_transfer', { destination: NEW_WALLET, amount: 5000 })}Open the transfer form to review it.`));
+  const svc = await start({ customers: [a], model });
+  t.after(svc.close);
+
+  const { events } = await say(svc, a, `Send 5000 to ${NEW_WALLET}`, await begin(svc, a));
+
+  assert.equal(cardOf(events).kind, 'prefill');
+  assert.ok(!events.some((e) => e.type === 'refusal'));
+  assert.equal(svc.audit.records.at(-1).prefill.overrodeRefusal, 'execute');
 });
 
 test('with both a pre-fill and a navigate tag only the pre-fill card is sent', async (t) => {

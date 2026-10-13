@@ -3,7 +3,6 @@ import { createFileAudit } from './audit.js';
 import { createModel, loadModelConfig } from './model.js';
 import { loadGuides } from './guides.js';
 import { loadNavigation } from './navigate.js';
-import { loadPrefill } from './prefill.js';
 import { loadLimits } from './limits.js';
 import { loadScamCues } from './scam.js';
 import { loadSupport } from './support.js';
@@ -47,11 +46,17 @@ const failedQuestions = createFileAudit(process.env.FAILED_QUESTIONS_LOG ?? 'dat
 const guides = loadGuides(new URL('../guides/', import.meta.url));
 // Output allowlist: comma-separated OUTPUT_ALLOW_URL_HOSTS / _EMAILS / _PHONES. Empty blocks everything.
 const list = (name) => (process.env[name] ?? '').split(',').map((v) => v.trim()).filter(Boolean);
+// Origins allowed to call the service from a browser page (the portal hosting the widget), exact and comma-separated,
+// for example ALLOWED_ORIGINS=http://localhost:3001. Empty means same-origin only. A wildcard or a path is refused.
+const allowedOrigins = list('ALLOWED_ORIGINS');
+for (const o of allowedOrigins) {
+  if (!/^https?:\/\/[A-Za-z0-9.-]+(:\d{1,5})?$/.test(o)) { console.error(`ALLOWED_ORIGINS: "${o}" is not an exact origin like http://localhost:3001`); process.exit(1); }
+}
 const outputAllowlist = { urlHosts: list('OUTPUT_ALLOW_URL_HOSTS'), emails: list('OUTPUT_ALLOW_EMAILS'), phones: list('OUTPUT_ALLOW_PHONES') };
 // Pages the assistant may offer as cards; the bank edits this file when the portal's routes change.
 const navigation = loadNavigation(process.env.NAVIGATE_ROUTES ?? new URL('../config/navigate-routes.json', import.meta.url));
-// Which fields the assistant may pre-fill on each form, and the double-check thresholds (placeholders until the bank sets them).
-const prefill = loadPrefill(process.env.PREFILL_REGISTRY ?? new URL('../config/prefill.json', import.meta.url), navigation);
+// Form pre-fill is switched off: a request to do a task gets a "Click here" link to the page and the guide's steps, and the
+// customer fills the form themselves. (The pre-fill code and config/prefill.json stay in the repo, unused.)
 const port = Number(process.env.PORT ?? 3000);
 const agents = support.agents;
 const consoleUrl = process.env.CONSOLE_URL ?? `http://localhost:${port}/console`;
@@ -67,6 +72,6 @@ const gateway = createHttpGateway({ tenants });
 // Dev only: TEST_TOKEN and TEST_CLI (a test customer's bearer token and cli) go on the demo page so a session can start.
 const devPage = process.env.TEST_TOKEN && process.env.TEST_CLI ? { token: process.env.TEST_TOKEN, cli: process.env.TEST_CLI, portalFlag: process.env.TEST_PORTAL_FLAG === '1' } : undefined;
 if (devPage) console.warn('TEST_TOKEN/TEST_CLI set: the demo page carries a real token. Local use only.');
-createService({ devPage, model: modelConfig ? createModel(modelConfig) : scriptedModel, gateway, clock, audit, guides, navigation, prefill, scamCues, failedQuestions, outputAllowlist, limits: loadLimits(process.env), mailer, agents, support, consoleUrl, retention }).listen(port, () => {
+createService({ allowedOrigins, devPage, model: modelConfig ? createModel(modelConfig) : scriptedModel, gateway, clock, audit, guides, navigation, scamCues, failedQuestions, outputAllowlist, limits: loadLimits(process.env), mailer, agents, support, consoleUrl, retention }).listen(port, () => {
   console.log(`assistant demo host: http://localhost:${port}/`);
 });

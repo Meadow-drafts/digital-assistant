@@ -96,3 +96,10 @@ test('the audit says whether the tool came from the model or the rules, and the 
   t.after(plain.close);
   assert.match(await (await fetch(`${plain.baseUrl}/`)).text(), /token="demo-token"/);
 });
+
+test('a request to be taken to a page is a navigation ask, not a data read', () => {
+  for (const q of ['Take me to my transaction history', 'open my transactions page', "Emmène-moi à mes dernières transactions", 'go to my history']) {
+    assert.equal(intentTool(q), null, q);
+  }
+  assert.equal(intentTool('show my last transactions').name, 'last_transactions');
+});

@@ -35,7 +35,7 @@ export const row = (c, over = {}) => ({
 });
 
 // Routes for createFakeGateway covering every customer by their own token.
-export function bankRoutes(customers, { limits = [] } = {}) {
+export function bankRoutes(customers, { limits = [], nomenclature = null } = {}) {
   const who = (token) => customers.find((c) => c.token === token);
   // like the real endpoint, lists every wallet under the cli, with personal details, for any valid token
   const connects = Object.fromEntries(customers.map((c) => [
@@ -88,6 +88,8 @@ export function bankRoutes(customers, { limits = [] } = {}) {
       const found = customers.flatMap((c) => c.rows).find((r) => r.clientReferenceId === query?.clientRefId || r.ntrans === query?.clientRefId);
       return found ? { success: '01', status: '01', data: found } : { success: '02', status: '02', message: 'Transaction not found' };
     },
+    // Shared reference data (the portal's nomenclature 6000, nature labels). Absent unless a test supplies it.
+    'GET /iwomicore/getNomenDataByTabcd/6000': ({ token }) => (!who(token) ? { status: 401, body: null } : nomenclature ? { data: nomenclature } : { status: 404, body: null }),
     'GET /digitalbank/plafond/montant': ({ token }) => (who(token) ? limits : { status: 401, body: null }),
   };
 }

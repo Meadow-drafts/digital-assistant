@@ -32,7 +32,7 @@ test('the card shows the portal page name and an Open and review button, drawn f
   assert.equal(card.dataset.kind, 'navigate');
   assert.equal(card.dataset.target, 'transfer');
   assert.equal(card.querySelector('[data-role="action-label"]').textContent, 'Transfer');
-  assert.equal(card.querySelector('button').textContent, 'Open and review');
+  assert.equal(card.querySelector('button').textContent, 'Click here to send money');
   assert.equal(card.querySelector('b'), null, 'model text is never rendered as markup');
 });
 

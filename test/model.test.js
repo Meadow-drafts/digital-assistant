@@ -151,3 +151,16 @@ test('model chain is built from environment config only', () => {
   });
   assert.equal(loadModelConfig({}), null);
 });
+
+test('routing is asked for with temperature 0 and answers with a low one, so the same message is routed the same way', async (t) => {
+  const provider = await startFakeProvider([['ok']]);
+  t.after(provider.close);
+  const model = createModel({ primary: { baseUrl: provider.baseUrl, model: 'm', apiKey: 'k' } });
+
+  for (const purpose of ['route', 'answer']) {
+    for await (const _ of model.chat({ purpose, messages: [{ role: 'user', content: 'hi' }], language: 'en' })) { /* drain */ }
+  }
+
+  assert.equal(provider.requests[0].body.temperature, 0);
+  assert.ok(provider.requests[1].body.temperature > 0 && provider.requests[1].body.temperature <= 0.5);
+});

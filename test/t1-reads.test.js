@@ -37,15 +37,18 @@ test('last transactions: ids come from clientInfo with the user\'s own token; th
     amount: 15000,
     currency: 'XAF',
     direction: 'out',
-    type: 'TRINC',
+    nature: { code: 'TRINC', en: 'TRINC', fr: 'TRINC' },
+    type: null,
     status: 'success',
     account: '****8901',
     counterparty: 'J. P. M.',
   });
 
-  // one masking point: model input, UI events and audit all carry the same masked form
+  // one masking point: model input, the tool result and audit all carry the same masked form. The customer's own
+  // screen also gets full values, but only in the separate `display` rows (checked in the display tests below).
   const seenByModel = JSON.stringify(model.calls.filter((c) => c.purpose !== 'route'));
-  for (const surface of [seenByModel, wire(events), JSON.stringify(svc.audit.records)]) {
+  const withoutDisplay = wire(events.map(({ display, ...rest }) => rest));
+  for (const surface of [seenByModel, withoutDisplay, JSON.stringify(svc.audit.records)]) {
     assert.match(surface, /REF-0001/);
     assert.match(surface, /15000/);
     assert.match(surface, /\*\*\*\*8901/);
@@ -264,7 +267,46 @@ test('a counterparty known only by phone number is shown as a masked phone, and 
   assert.equal(byRef['REF-IN'].direction, 'in');
   assert.equal(byRef['REF-IN'].counterparty, '******222');
   assert.equal(byRef['REF-IN'].account, '****8901');
-  assert.doesNotMatch(wire(events), /237677000999|237600111222|99999999999/);
+  // The model input and the audit stay masked; only the customer's own screen (the display rows) carries full values.
+  assert.doesNotMatch(JSON.stringify(svc.model.calls.map((c) => c.messages)), /237677000999|237600111222|99999999999/);
+  assert.doesNotMatch(JSON.stringify(svc.audit.records), /237677000999|237600111222|99999999999/);
+  const tool = events.find((e) => e.type === 'tool');
+  assert.doesNotMatch(JSON.stringify(tool.result), /237677000999|237600111222|99999999999/);
+  const shown = tool.display.transactions;
+  assert.deepEqual(shown.map((x) => [x.from, x.to]), [[a.sub, '237677000999'], ['237600111222', a.sub]]);
+});
+
+test('the display rows follow the portal History table: padded numbers trimmed, nature label from nomenclature 6000 in EN and FR, type from the service, member with its id', async (t) => {
+  const a = alice();
+  a.rows = [row(a, {
+    ntrans: 'MTR1', clientReferenceId: '', dop: null, dmo: '2026-09-25T15:43:13', dou1: '2026-09-25T15:43:20', nat: 'TRIB', service: 'GIMAC-EMI',
+    codewaldo: ` ${a.sub} `, codewalop: '237671996088', partnerlib: 'ADVANS', partnerid: '11020',
+  })];
+  const svc = await start({ customers: [a], model: toolModel('[[tool:last_transactions {}]]'), fixtures: { nomenclature: [{ lib1: 'TRIB', lib2: 'Bank transfer', lib6: 'Virement bancaire' }] } });
+  t.after(svc.close);
+
+  const { events } = await say(svc, a, 'my last transactions', await begin(svc, a));
+
+  const tool = events.find((e) => e.type === 'tool');
+  assert.deepEqual(tool.display.transactions[0], {
+    date: '2026-09-25 15:43:20', id: 'MTR1', from: a.sub, to: '237671996088', member: 'ADVANS [11020]',
+    nature: { code: 'TRIB', en: 'Bank transfer', fr: 'Virement bancaire' }, type: 'emission',
+    amount: 15000, currency: 'XAF', status: 'success', direction: 'out',
+  });
+  assert.equal(tool.result.transactions[0].type, 'emission');
+  assert.equal(tool.result.transactions[0].nature.fr, 'Virement bancaire');
+});
+
+test('if the nomenclature cannot be read, nature shows its code and nothing fails', async (t) => {
+  const a = alice();
+  a.rows = [row(a, { nat: 'TRIB' })];
+  const svc = await start({ customers: [a], model: toolModel('[[tool:last_transactions {}]]') });
+  t.after(svc.close);
+
+  const { events } = await say(svc, a, 'my last transactions', await begin(svc, a));
+
+  assert.equal(events.find((e) => e.type === 'tool').display.transactions[0].nature.en, 'TRIB');
+  assert.ok(!events.some((e) => e.type === 'tool_blocked'));
 });
 
 test('session start: the cli the widget claims is verified with the backend under the user\'s token, and the ids are fixed from the verified answer', async (t) => {
@@ -490,4 +532,34 @@ test('the session verifier drops every balance field and the client\'s name, ema
   ];
   for (const [surface, text] of surfaces) assert.doesNotMatch(text, forbidden, `${surface} leaked a clientInfo field`);
   assert.match(wire(events), /REF-0001/, 'the read itself still worked');
+});
+
+test('rows shaped like the real server (dop null, dates in dmo/dou1, empty clientReferenceId) still show a date and a reference, newest first', async (t) => {
+  const a = alice();
+  a.rows = [
+    row(a, { ntrans: 'MPU1', clientReferenceId: '', dop: null, dmo: '2026-09-28T16:34:30', dou1: '2026-09-28T16:34:03' }),
+    row(a, { ntrans: 'MTR2', clientReferenceId: 'REF-2', dop: null, dmo: null, dou1: '2026-10-05T21:20:39' }),
+    row(a, { ntrans: 'MTR3', clientReferenceId: '', dop: null, dmo: '2026-09-25T16:07:43' }),
+  ];
+  const svc = await start({ customers: [a], model: toolModel('[[tool:last_transactions {"count":5}]]') });
+  t.after(svc.close);
+
+  const { events } = await say(svc, a, 'Show my last transactions', await begin(svc, a));
+
+  const txs = events.find((e) => e.type === 'tool').result.transactions;
+  assert.deepEqual(txs.map((x) => [x.reference, x.date]), [['REF-2', '2026-10-05'], ['MPU1', '2026-09-28'], ['MTR3', '2026-09-25']]);
+});
+
+test('a reply listing real-shaped references and dates is not blocked as a phone number', async (t) => {
+  const a = alice();
+  a.rows = [row(a, { ntrans: 'MPU179123163935', clientReferenceId: '', dop: null, dmo: '2026-09-28T16:34:30', mtrans: 12000 })];
+  const reply = 'MPU179123163935 on 2026-09-28 12000 XAF, 2026-09-28 12000';
+  const model = createFakeModel((req) => (req.purpose === 'route' ? '[[tool:last_transactions {"count":5}]]' : reply));
+  const svc = await start({ customers: [a], model });
+  t.after(svc.close);
+
+  const { events } = await say(svc, a, 'Show my last transactions', await begin(svc, a));
+
+  assert.ok(!events.some((e) => e.type === 'blocked'));
+  assert.ok(events.filter((e) => e.type === 'delta').map((e) => e.text).join('').includes('MPU179123163935'));
 });

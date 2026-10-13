@@ -14,6 +14,7 @@ function checkRoute(id, route) {
   if (FORBIDDEN.test(route.path)) fail('this page is never linked');
   if (route.path.split('/').some((segment) => /^\d+$/.test(segment))) fail('a path with a record id is never linked');
   if (!route.labels?.en || !route.labels?.fr) fail('labels are needed in English and French');
+  if (route.cta !== undefined && !(route.cta?.en && route.cta?.fr)) fail('cta needs text in English and French');
 }
 
 export function parseNavigation(config) {
@@ -57,8 +58,11 @@ const cardOf = (navigation, id, route, language) => ({
   target: id,
   path: route.path,
   label: route.labels[language] ?? route.labels.en,
-  button: navigation.button[language] ?? navigation.button.en,
+  button: route.cta?.[language] ?? route.cta?.en ?? navigation.button[language] ?? navigation.button.en,
 });
+
+// The page id whose path is exactly this one (a guide's own page), or null.
+export const routeIdForPath = (navigation, path) => [...navigation.routes].find(([, route]) => route.path === path)?.[0] ?? null;
 
 // A prefillOnly page (the airtime form) can be opened by a pre-fill card, never by a plain navigate card.
 export function validateProposal(navigation, id, language, entitlements, { forPrefill = false } = {}) {

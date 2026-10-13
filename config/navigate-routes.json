@@ -1,56 +1,169 @@
 {
-  "_note": "Pages the assistant may offer as 'Open and review' cards. Paths and names are copied from the portal's route config (src/routes/app.routes.js in bpay-bicec); update them here when the portal changes. 'labels' are the portal's own page names. 'natures' are the package nature codes of the route (a customer needs any one of them when packages are used). 'primaryOnly' pages are never offered to a secondary connect. 'audience' lists who may see the page. Approvals, PIN and password change and any path with a record id are refused at load, whatever this file says. A route with 'prefillOnly' is never offered as a plain navigate card: only a pre-fill card (config/prefill.json) may open it.",
-  "button": { "en": "Open and review", "fr": "Ouvrir et vérifier" },
-  "routes": {
-    "overview": {
-      "path": "/overview",
-      "labels": { "en": "Overview", "fr": "Vue d’ensemble" }
-    },
-    "history": {
-      "path": "/history",
-      "labels": { "en": "History", "fr": "Historique" }
-    },
-    "account_history": {
-      "path": "/history/account",
-      "labels": { "en": "Account History", "fr": "Historique Compte" },
-      "primaryOnly": true,
-      "natures": ["HIST"]
-    },
-    "transfer": {
-      "path": "/transfer",
-      "labels": { "en": "Transfer", "fr": "Transfert" },
-      "audience": ["individual"],
-      "natures": ["TRINC", "ACCT", "WTACC", "TRINW", "ACCTW", "TRIB", "OARE", "OWRE", "OCRE", "OVRE"]
-    },
-    "payments": {
-      "path": "/payments",
-      "labels": { "en": "Payments", "fr": "Paiements" },
-      "audience": ["individual"],
-      "natures": ["PALO", "PACE", "PACEI", "PAIM", "GPAY", "DDPA", "DDPC"]
-    },
-    "bill_payment": {
-      "path": "/payments/bill-payment",
-      "labels": { "en": "Bill payment", "fr": "Bill payment" },
-      "audience": ["individual"],
-      "natures": ["LOPV", "LOPE", "LOPA", "LOPS", "L0PC", "CEPV"]
-    },
-    "vouchers": {
-      "path": "/vouchers",
-      "labels": { "en": "Voucher", "fr": "Vouchers" },
-      "audience": ["individual"],
-      "natures": ["CAOUT"]
-    },
-    "airtime": {
-      "path": "/payments/value-added-services",
-      "labels": { "en": "Airtime", "fr": "Crédit téléphonique" },
-      "audience": ["individual"],
-      "natures": ["LOAR", "CEAR", "LOIB", "CEIB"],
-      "prefillOnly": true
-    },
-    "request_to_pay": {
-      "path": "/request-to-pay",
-      "labels": { "en": "Request to Pay", "fr": "Demande de paiement" },
-      "natures": ["DDPA", "DDPC"]
-    }
+ "_note": "Pages the assistant may offer as cards with a \"Click here to ...\" button ('cta'; 'button' is the fallback label). Paths and names are copied from the portal's route config (src/routes/app.routes.js in bpay-bicec); update them here when the portal changes. 'labels' are the portal's own page names. 'natures' are the package nature codes of the route (a customer needs any one of them when packages are used). 'primaryOnly' pages are never offered to a secondary connect. 'audience' lists who may see the page. Approvals, PIN and password change and any path with a record id are refused at load, whatever this file says.",
+ "button": {
+  "en": "Open and review",
+  "fr": "Ouvrir et vérifier"
+ },
+ "routes": {
+  "overview": {
+   "path": "/overview",
+   "labels": {
+    "en": "Overview",
+    "fr": "Vue d’ensemble"
+   },
+   "cta": {
+    "en": "Click here to see your overview",
+    "fr": "Cliquez ici pour voir votre vue d’ensemble"
+   }
+  },
+  "history": {
+   "path": "/history",
+   "labels": {
+    "en": "History",
+    "fr": "Historique"
+   },
+   "cta": {
+    "en": "Click here to see your history",
+    "fr": "Cliquez ici pour voir votre historique"
+   }
+  },
+  "account_history": {
+   "path": "/history/account",
+   "labels": {
+    "en": "Account History",
+    "fr": "Historique Compte"
+   },
+   "primaryOnly": true,
+   "natures": [
+    "HIST"
+   ],
+   "cta": {
+    "en": "Click here to see your account history",
+    "fr": "Cliquez ici pour voir l’historique de votre compte"
+   }
+  },
+  "transfer": {
+   "path": "/transfer",
+   "labels": {
+    "en": "Transfer",
+    "fr": "Transfert"
+   },
+   "audience": [
+    "individual"
+   ],
+   "natures": [
+    "TRINC",
+    "ACCT",
+    "WTACC",
+    "TRINW",
+    "ACCTW",
+    "TRIB",
+    "OARE",
+    "OWRE",
+    "OCRE",
+    "OVRE"
+   ],
+   "cta": {
+    "en": "Click here to send money",
+    "fr": "Cliquez ici pour envoyer de l’argent"
+   }
+  },
+  "payments": {
+   "path": "/payments",
+   "labels": {
+    "en": "Payments",
+    "fr": "Paiements"
+   },
+   "audience": [
+    "individual"
+   ],
+   "natures": [
+    "PALO",
+    "PACE",
+    "PACEI",
+    "PAIM",
+    "GPAY",
+    "DDPA",
+    "DDPC"
+   ],
+   "cta": {
+    "en": "Click here to make a payment",
+    "fr": "Cliquez ici pour effectuer un paiement"
+   }
+  },
+  "bill_payment": {
+   "path": "/payments/bill-payment",
+   "labels": {
+    "en": "Bill payment",
+    "fr": "Bill payment"
+   },
+   "audience": [
+    "individual"
+   ],
+   "natures": [
+    "LOPV",
+    "LOPE",
+    "LOPA",
+    "LOPS",
+    "L0PC",
+    "CEPV"
+   ],
+   "cta": {
+    "en": "Click here to pay a bill",
+    "fr": "Cliquez ici pour payer une facture"
+   }
+  },
+  "vouchers": {
+   "path": "/vouchers",
+   "labels": {
+    "en": "Voucher",
+    "fr": "Vouchers"
+   },
+   "audience": [
+    "individual"
+   ],
+   "natures": [
+    "CAOUT"
+   ],
+   "cta": {
+    "en": "Click here to open vouchers",
+    "fr": "Cliquez ici pour ouvrir les vouchers"
+   }
+  },
+  "airtime": {
+   "path": "/payments/value-added-services",
+   "labels": {
+    "en": "Airtime",
+    "fr": "Crédit téléphonique"
+   },
+   "audience": [
+    "individual"
+   ],
+   "natures": [
+    "LOAR",
+    "CEAR",
+    "LOIB",
+    "CEIB"
+   ],
+   "cta": {
+    "en": "Click here to buy airtime",
+    "fr": "Cliquez ici pour acheter du crédit"
+   }
+  },
+  "request_to_pay": {
+   "path": "/request-to-pay",
+   "labels": {
+    "en": "Request to Pay",
+    "fr": "Demande de paiement"
+   },
+   "natures": [
+    "DDPA",
+    "DDPC"
+   ],
+   "cta": {
+    "en": "Click here to request a payment",
+    "fr": "Cliquez ici pour demander un paiement"
+   }
   }
+ }
 }

@@ -7,7 +7,8 @@
 // Host events (all cancelable): bank-assistant:navigate {path, target} when a card asks for a page, and
 // bank-assistant:prefill {form, fields} when a pre-fill card has a page to fill. A host that cancels the second one
 // owns the fill (the production hook); otherwise the widget fills matching inputs of the page itself.
-// fill-timeout (attribute, ms, default 3000): how long to wait for the form to appear after navigating.
+// fill-timeout (attribute, ms): how long to wait for the form to appear after navigating. Without it a card may ask
+// for a longer wait (waitMs, for a form behind several choices the customer makes); the default is 3000.
 // Handoff: only a click on the human chip asks the service for a case (the host also hears
 // bank-assistant:handoff-request). The widget then shows the case banner and polls the service every poll-ms
 // (attribute, default 2000) for the case state and the agent's messages.
@@ -46,6 +47,9 @@ const TEXT = {
     cancelled: (ref) => `Case ${ref} closed: cancelled by you. Back to the assistant.`,
     resolved: (ref) => `Case ${ref} resolved.`,
     solvedQ: 'Was this solved?',
+    noAccount: 'The assistant is not connected to your account (no customer id was found for this sign-in), so links to your pages and your account data are not available. Try signing in again.',
+    tx: { date: 'Date', id: 'Id', from: 'From', to: 'To', member: 'Member', nature: 'Nature', type: 'Type', amount: 'Amount', status: 'Status',
+      emission: 'Emission', acquisition: 'Acquisition', success: 'Completed', failed: 'Failed', pending: 'Pending', unknown: 'Pending' },
     yes: 'Yes',
     no: 'No',
     thanks: 'Thank you for your feedback.',
@@ -100,6 +104,9 @@ const TEXT = {
     cancelled: (ref) => `Dossier ${ref} fermé : annulé par vous. Retour à l'assistant.`,
     resolved: (ref) => `Dossier ${ref} résolu.`,
     solvedQ: 'Cela a-t-il résolu votre problème ?',
+    noAccount: "L'assistant n'est pas connecté à votre compte (aucun identifiant client trouvé pour cette connexion) : les liens vers vos pages et vos données de compte ne sont pas disponibles. Essayez de vous reconnecter.",
+    tx: { date: 'Date', id: 'Id', from: 'De', to: 'Vers', member: 'Membre', nature: 'Nature', type: 'Type', amount: 'Montant', status: 'Statut',
+      emission: 'Émission', acquisition: 'Acquisition', success: 'Terminé', failed: 'Échoué', pending: 'En attente', unknown: 'En attente' },
     yes: 'Oui',
     no: 'Non',
     thanks: 'Merci pour votre retour.',
@@ -465,6 +472,48 @@ class BankAssistant extends HTMLElement {
     return el;
   }
 
+  // The customer's own recent transactions, laid out like the portal's History table. Full values: this is their
+  // own data on their own screen (the model and the audit log only ever see the masked form). Text only, no markup.
+  addTransactions(rows, language = this.lang) {
+    const lang = TEXT[language] ? language : this.lang;
+    const T = TEXT[lang].tx;
+    const wrap = document.createElement('div');
+    wrap.dataset.role = 'transactions';
+    // The chat area is a grid, which squeezes or overlaps a scroll container that is itself a grid item. So the grid
+    // item is a plain box (min-width 0 so it never widens the panel) and the sideways scrolling happens inside it.
+    wrap.style.cssText = 'min-width:0;max-width:100%';
+    const scroller = document.createElement('div');
+    scroller.dataset.role = 'transactions-scroll';
+    scroller.style.cssText = 'overflow-x:auto;max-width:100%';
+    const table = document.createElement('table');
+    table.style.cssText = 'border-collapse:collapse;font-size:.75rem;width:100%';
+    const cell = (tag, text, right = false) => {
+      const c = document.createElement(tag);
+      c.textContent = text ?? '';
+      c.style.cssText = `padding:.2rem .4rem;border-bottom:1px solid #d0d4da;white-space:nowrap;text-align:${right ? 'right' : 'left'}`;
+      return c;
+    };
+    const head = document.createElement('tr');
+    for (const k of ['date', 'id', 'from', 'to', 'member', 'nature', 'type', 'amount', 'status']) head.appendChild(cell('th', T[k], k === 'amount'));
+    table.appendChild(head);
+    for (const r of rows.slice(0, 50)) {
+      const tr = document.createElement('tr');
+      tr.dataset.status = String(r.status ?? '');
+      const nature = lang === 'fr' ? r.nature?.fr : r.nature?.en;
+      // The bank's `dev` is often a numeric code (59); the portal shows XAF for these.
+      const currency = /^[A-Za-z]{3}$/.test(String(r.currency ?? '')) ? r.currency : 'XAF';
+      const amount = r.amount == null ? '' : `${Number(r.amount).toLocaleString(lang === 'fr' ? 'fr-FR' : 'en-US')} ${currency}`;
+      const values = [r.date, r.id, r.from, r.to, r.member, nature ?? r.nature?.code, T[r.type] ?? r.type, amount, T[r.status] ?? T.unknown];
+      values.forEach((v, i) => tr.appendChild(cell('td', v == null ? '' : String(v), i === 7)));
+      table.appendChild(tr);
+    }
+    scroller.appendChild(table);
+    wrap.appendChild(scroller);
+    this.q('messages').appendChild(wrap);
+    scroller.scrollLeft = 0;
+    wrap.scrollIntoView?.({ block: 'nearest', inline: 'start' });
+  }
+
   addAutomatedLabel() {
     const el = document.createElement('div');
     el.dataset.role = 'automated-label';
@@ -535,10 +584,11 @@ class BankAssistant extends HTMLElement {
     line('action-beneficiary', card.beneficiary ? `${t.beneficiary}: ${card.beneficiary}` : null);
     line('action-amount', card.amount ? `${t.amount}: ${card.amount.value} ${card.amount.currency}` : null);
     line('double-check', card.doubleCheck); // a plain line: it blocks nothing and adds no click
+    line('action-directions', card.directions); // what the customer does first, when the form is behind choices
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = String(card.button);
-    const clean = { ...card, fields };
+    const clean = { ...card, fields, mode: card.mode === 'directions' ? 'directions' : 'fill', directions: text(card.directions, 500), waitMs: Number.isFinite(card.waitMs) ? Math.min(Math.max(card.waitMs, 0), 300000) : null };
     this.cards.set(el, clean);
     button.addEventListener('click', () => this.openAndFill(clean, el));
     el.append(button);
@@ -589,13 +639,29 @@ class BankAssistant extends HTMLElement {
   }
 
   async fillCard(card, cardEl) {
+    // A form behind several choices (the card says so): nothing is filled and nothing is waited for. The customer is
+    // sent to the page and given the values to enter, which they already have in the card's directions.
+    if (card.mode === 'directions') {
+      if (card.fields.length) this.showCopyValues(cardEl ?? this.q('messages'), [...card.fields]);
+      return;
+    }
     // The host may do the fill itself with its own hook; then the widget leaves the page alone.
     const bridge = new CustomEvent('bank-assistant:prefill', {
       bubbles: true, cancelable: true, detail: { form: card.form, fields: card.fields.map(({ field, value }) => ({ field, value })) },
     });
     if (!this.dispatchEvent(bridge)) return;
-    const waitMs = Number(this.getAttribute('fill-timeout') ?? 3000);
-    const deadline = Date.now() + (Number.isFinite(waitMs) ? waitMs : 3000);
+    // How long to keep looking for the inputs: the host's fill-timeout if it set one, else the card's own wait (a form
+    // behind choices the customer makes first), else 3 s. Only this customer's browser waits; the service is not involved.
+    const attr = this.getAttribute('fill-timeout');
+    const waitMs = attr !== null && Number.isFinite(Number(attr)) ? Number(attr) : (card.waitMs ?? 3000);
+    const started = Date.now();
+    const deadline = started + waitMs;
+    // The wait ends early, with nothing more done, when the customer sends another message, leaves the page or the
+    // widget goes away: a form must never fill itself long after the customer moved on.
+    const run = Symbol('fill');
+    this.fillRun = run;
+    const page = window.location.pathname;
+    const stale = () => this.fillRun !== run || !this.isConnected || window.location.pathname !== page;
     const pending = [...card.fields];
     for (;;) {
       for (const field of [...pending]) {
@@ -605,8 +671,10 @@ class BankAssistant extends HTMLElement {
         pending.splice(pending.indexOf(field), 1);
       }
       if (pending.length === 0 || Date.now() >= deadline) break;
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, Date.now() - started < 3000 ? 50 : 300));
+      if (stale()) return;
     }
+    if (this.fillRun === run) this.fillRun = null;
     if (pending.length) this.showCopyValues(cardEl ?? this.q('messages'), pending);
   }
 
@@ -670,6 +738,11 @@ class BankAssistant extends HTMLElement {
   // (how-to help only), so a failure here is not fatal.
   async startSession(token) {
     const cli = this.getCli?.() ?? this.getAttribute('cli');
+    if (!cli && this.getCli && !this.noAccountShown) {
+      // A host that supplies a customer id (the portal) gave none: say so once, instead of failing silently.
+      this.noAccountShown = true;
+      this.addNote(TEXT[this.lang].noAccount);
+    }
     if (!cli || this.sessionStarted) return;
     let gating = this.getGating?.();
     try { gating ??= JSON.parse(this.getAttribute('gating') ?? 'null'); } catch { gating = null; }
@@ -754,6 +827,7 @@ class BankAssistant extends HTMLElement {
 
   async ask(message, { resend = false } = {}) {
     this.busy = true;
+    this.fillRun = null; // a waiting pre-fill ends when the customer moves on to something else
     if (!resend) this.addMessage('user', message);
     let pinNeeded = false;
     this.q('thinking').hidden = false;
@@ -789,6 +863,8 @@ class BankAssistant extends HTMLElement {
           // Prominence is sticky for the conversation: a calm turn never hides a raised chip.
           if (ev.prominent) this.q('human-chip').dataset.prominent = 'true';
           if (ev.reasons?.some((r) => DISPUTE_REASONS.includes(r))) this.disputeLike = true;
+        } else if (ev.type === 'tool' && Array.isArray(ev.display?.transactions) && ev.display.transactions.length) {
+          this.addTransactions(ev.display.transactions, ev.language);
         } else if (ev.type === 'tool_blocked') {
           if (ev.code === 'session_expired') this.sessionStarted = false;
           if (ev.code === 'pin_required') pinNeeded = true;

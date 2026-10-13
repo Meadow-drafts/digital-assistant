@@ -1,15 +1,20 @@
 // One OpenAI-compatible adapter. Provider, model and base URL are plain config
 // (see loadModelConfig); API keys come from the environment and are only ever
 // sent in the Authorization header, never put in errors, events or logs.
+// Without a temperature the provider's default is used (close to 1 on Groq), and the same message was seen routed
+// four different ways. Routing picks a guide or a tag, so it is made as repeatable as the provider allows; answers
+// and summaries keep a little room. The caller says which it is with `purpose`.
+export const TEMPERATURE = { route: 0, answer: 0.3, summary: 0.2 };
+
 function createAdapter({ baseUrl, model, apiKey }) {
   return {
     name: model,
-    async *chat({ messages, language }) {
+    async *chat({ messages, language, purpose }) {
       const hint = { role: 'system', content: language === 'fr' ? 'Reply in French.' : 'Reply in English.' };
       const res = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
-        body: JSON.stringify({ model, stream: true, messages: [hint, ...messages] }),
+        body: JSON.stringify({ model, stream: true, temperature: TEMPERATURE[purpose] ?? TEMPERATURE.answer, messages: [hint, ...messages] }),
       });
       if (!res.ok) throw new Error(`provider returned ${res.status}`);
       const decoder = new TextDecoder();

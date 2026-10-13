@@ -4,6 +4,7 @@ import { startService } from './harness/start-service.js';
 import { createFakeModel } from './harness/fake-model.js';
 import { chatTurn } from './harness/sse.js';
 import { loadGuides } from '../src/guides.js';
+import { createOutputFilter } from '../src/filter.js';
 
 const replyOf = (events) => events.filter((e) => e.type === 'delta').map((e) => e.text).join('');
 const blockedOf = (events) => events.find((e) => e.type === 'blocked');
@@ -89,4 +90,12 @@ test('quoting a guide is not a prompt echo', async (t) => {
   const { events } = await chatTurn(svc.baseUrl, { message: 'how do I buy airtime', tenant: 'demo' });
 
   assert.equal(blockedOf(events), undefined);
+});
+
+test('a number the customer typed in this message may be repeated back, any other number is still blocked', () => {
+  const check = createOutputFilter({});
+  assert.equal(check('I will open the form for 237677000555.', { typed: 'Send 5000 to 237677000555' }), null);
+  assert.equal(check('I will open the form for 237 677 000 555.', { typed: 'Send 5000 to 237677000555' }), null);
+  assert.equal(check('Call 237699888777 instead.', { typed: 'Send 5000 to 237677000555' }), 'phone');
+  assert.equal(check('Call 237677000555.'), 'phone');
 });

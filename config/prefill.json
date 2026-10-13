@@ -1,5 +1,5 @@
 {
-  "_note": "Pre-fill registry: exactly which fields the assistant may fill on each form. 'route' is a page id from navigate-routes.json (entitlements are checked there). 'dom' lists the portal input names (read from bpay-bicec src, TRANSFER_KEYS and the form components) that the widget may fill, first one found wins; null means the portal has no input for it, so the field is shown on the card only. Types: beneficiary (named by the customer or chosen from their own history), amount, text, choice, reference, account_index (an index into the customer's own accounts), currency. 'checks' says which double-check lines the form may show. Anything not listed here is rejected. PIN, OTP, password, voucher and code fields are refused at load, whatever this file says. The double-check numbers are placeholders until the bank sets them.",
+  "_note": "Pre-fill registry: exactly which fields the assistant may fill on each form. 'route' is a page id from navigate-routes.json (entitlements are checked there). 'dom' lists the portal input names (read from bpay-bicec src, TRANSFER_KEYS and the form components) that the widget may fill, first one found wins; null means the portal has no input for it, so the field is shown on the card only. Types: beneficiary (named by the customer or chosen from their own history), amount, text, choice, reference, account_index (an index into the customer's own accounts), currency. 'checks' says which double-check lines the form may show. 'mode' is \"fill\" (the widget fills the inputs; the default) or \"directions\" (for a form that sits behind several choices: the card shows the 'directions' text, opens the page and lists the values to enter, and nothing is filled). 'directions' (EN and FR) is required in directions mode. 'waitSeconds' (optional, 1-300, fill mode) is how long the widget keeps waiting for the inputs to appear. Anything not listed here is rejected. PIN, OTP, password, voucher and code fields are refused at load, whatever this file says. The double-check numbers are placeholders until the bank sets them.",
   "doubleCheck": {
     "largeAmount": 500000,
     "usualMultiple": 5,
@@ -10,6 +10,11 @@
   "forms": {
     "single_transfer": {
       "route": "transfer",
+      "mode": "directions",
+      "directions": {
+        "en": "On Transfers, open the “Single Transfer” tab. Choose the region (your bank's logo, or GIMAC), then Account or Wallet. When you reach the form, enter the recipient and amount listed below. You make the choices and click Next yourself.",
+        "fr": "Sur Transfert, ouvrez l’onglet « Transfert unique ». Choisissez la région (le logo de votre banque, ou GIMAC), puis Compte ou Wallet. Une fois au formulaire, saisissez le bénéficiaire et le montant indiqués ci-dessous. C’est vous qui faites les choix et cliquez sur Suivant."
+      },
       "checks": ["newBeneficiary", "largeAmount"],
       "summary": {
         "en": "Transfer {amount} to {destination}[ from {sourceAccount}][ for “{narrative}”]",

@@ -46,7 +46,7 @@ test('a claiming agent sees the draft, an AI summary labelled "may be wrong", ma
   assert.match(body.summary.label, /may be wrong/i);
   assert.equal(body.records.length, 2);
   assert.deepEqual(body.records[0], {
-    reference: 'REF-0001', date: '2026-10-10', amount: 15000, currency: 'XAF', direction: 'out', type: 'TRINC', status: 'failed', account: '****8901', counterparty: 'J. P. M.',
+    reference: 'REF-0001', date: '2026-10-10', amount: 15000, currency: 'XAF', direction: 'out', nature: { code: 'TRINC', en: 'TRINC', fr: 'TRINC' }, type: null, status: 'failed', account: '****8901', counterparty: 'J. P. M.',
   });
   assert.ok(body.transcript.some((m) => m.from === 'customer' && /wrong person/.test(m.text)), 'the raw transcript is there');
   assert.doesNotMatch(JSON.stringify(body), /12345678901|Jean|Paul Mbarga|Marie|Ngo|237677000999/);
