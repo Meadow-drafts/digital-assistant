@@ -18,6 +18,14 @@ npm run check:guides   # fails if a guide exists in one language only
 npm start              # service on http://localhost:3000, demo host page on /, agent console on /console
 ```
 
+```sh
+export GROQ_API_KEY=...                         # read from the environment only
+npm run eval -- --model qwen/qwen3.8-27b         # the whole EN/FR eval set through the real service (not part of npm test or CI)
+npm run eval -- --model qwen/qwen3.8-27b --limit 2   # at most 2 new items this run (cheap check)
+```
+
+`npm run eval` options: `--limit N` (items), `--lang en|fr`, `--items H1,T2`, `--fresh` (ignore earlier results), `--base-url` (default Groq; a local Ollama such as `http://localhost:11434/v1` needs no key). It paces itself to the Groq free plan (7,000 estimated tokens per minute, 950 requests per day), writes `eval/results/<model>.<lang>.json` and `.md` (pass rate, per-group rates, failing items with the lines that failed) after every item, and a repeat run resumes where it stopped. See `eval/items.js` for the 67 items and their expected-behaviour lines.
+
 `npm test` uses fakes only (fake model, gateway, mailer, clock). It calls no model and no bank server and needs no key or token.
 
 ### Settings
@@ -114,6 +122,6 @@ These need the real portal; jsdom tests do not prove them.
 
 ## Open items
 
-- The EN/FR eval run through the service (ticket 34) is not built: there is no measured score for how the real model behaves, only the fixed-layer tests.
+- The EN/FR eval harness (ticket 34) is built, but no real-model run has been made yet: there is no measured score until `npm run eval` is run with a key.
 - Gap tickets 52-61 in the scratch folder: 53 (transfer status by reference times out on the test server) and 56 (explain-failure History step ignores the package) are still open.
 - Hand-over items are listed in ticket 35: proof of the compliance agreement, a production model, a scoped token, a backend that binds ids to the token, a server-side balance PIN, backend logging fixes, SSO for agents, a durable case store, a real SMTP account. Production mode (`ASSISTANT_MODE=production`) refuses to start until the prerequisites are met.
