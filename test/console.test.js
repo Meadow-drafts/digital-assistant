@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { startService } from './harness/start-service.js';
 import { createFakeModel } from './harness/fake-model.js';
 import { openWidget } from './harness/open-widget.js';
-import { AGENTS, customer } from './harness/cases.js';
+import { AGENTS, agentLogin, customer } from './harness/cases.js';
 
 async function openConsole(svc, t, path = '/console') {
   const w = await openWidget(svc.baseUrl, path);
@@ -129,5 +129,30 @@ test('an agent transfers the case from the console to a colleague, who then sees
 
   await w.until(() => /paul/i.test(w.q('detail-state').textContent));
   assert.equal(w.q('transfer').disabled, true, 'it is no longer yours');
+  assert.equal((await c.status()).body.agent.firstName, 'Paul');
+});
+
+test('after the 30-minute re-broadcast a colleague sees the held case in the list, opens it and claims it from the console', async (t) => {
+  const svc = await startService({ model: createFakeModel(['ok']), agents: { ...AGENTS, sessionMs: 3 * 60 * 60_000 } });
+  t.after(svc.close);
+  const c = await customer(svc.baseUrl, 'test-token', 'Hello there');
+  const { ref } = (await c.handoff()).body;
+  const aline = await agentLogin(svc.baseUrl, 'aline');
+  await aline.claim(ref);
+  const w = await openConsole(svc, t);
+  await signIn(w, 'paul');
+  await w.until(() => row(w, ref));
+  row(w, ref).click();
+  await w.until(() => w.q('detail-ref')?.textContent.includes(ref));
+  assert.equal(w.q('claim').disabled, true, 'closed to a colleague while Aline holds it');
+  assert.equal(w.qa('line').length, 0, 'and no content is shown');
+
+  await svc.clock.advance(30 * 60_000);
+
+  await w.until(() => !w.q('claim').disabled);
+  await w.until(() => w.qa('line').some((l) => l.textContent.includes('Hello there')));
+  w.q('claim').click();
+  await w.until(() => !w.q('resolve').disabled);
+  assert.match(w.q('detail-state').textContent, /with you/i);
   assert.equal((await c.status()).body.agent.firstName, 'Paul');
 });

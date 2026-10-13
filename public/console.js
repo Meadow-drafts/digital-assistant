@@ -44,7 +44,8 @@ function showConsole() {
 
 const label = (c) => {
   if (c.state === 'resolved') return c.closeReason === 'cancelled_by_user' ? 'Resolved (cancelled by user)' : 'Resolved';
-  if (c.state === 'with_agent') return c.claimedBy === me ? 'With you' : `With ${c.claimedBy}`;
+  // A re-broadcast case (30 minutes without a reply) is open to every agent: say so in the list.
+  if (c.state === 'with_agent') return c.claimedBy === me ? 'With you' : `With ${c.claimedBy}${c.claimable ? ' · open to any agent' : ''}`;
   return STATE[c.state] ?? c.state;
 };
 
@@ -91,7 +92,7 @@ function renderDetail(d) {
   $('detail-state').textContent = label(d);
   $('detail-claimed-by').textContent = d.claimedBy ?? 'nobody';
   const mine = d.state === 'with_agent' && d.claimedBy === me;
-  $('claim').disabled = d.state !== 'waiting';
+  $('claim').disabled = !d.claimable;
   $('resolve').disabled = !mine;
   // The colleagues come with the case; the choice survives the periodic refresh.
   const names = JSON.stringify(d.colleagues ?? []);
@@ -187,7 +188,7 @@ $('audit-form').addEventListener('submit', (e) => { e.preventDefault(); loadAudi
 $('claim').addEventListener('click', async () => {
   $('claim-error').textContent = '';
   const res = await api('POST', `/agent/cases/${encodeURIComponent(selected)}/claim`);
-  if (!res.ok) $('claim-error').textContent = res.status === 409 ? 'Already claimed by another agent (or no longer waiting).' : 'Could not claim this case.';
+  if (!res.ok) $('claim-error').textContent = res.status === 409 ? 'Already claimed by another agent (or no longer open).' : 'Could not claim this case.';
   refresh();
 });
 

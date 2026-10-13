@@ -109,7 +109,7 @@ Stories 95 and 96 (scoreboard, scripted replay) belong to the later phases (tick
 | 69 | console-context: priority flag, queue order, PRIORITY page, after-hours order | Proven |
 | 70 | handoff: "the agent chats back in the same session"; console: "claims, reads the masked transcript, chats with the customer and resolves" | Proven |
 | 71 | case-lifecycle: transfer tests; console: "agent transfers the case from the console to a colleague" | Proven |
-| 72 | case-lifecycle: 10 min soft message, 30 min re-broadcast and email offer. The re-broadcast reaches agents who then cannot open the held case | Proven, with **gap, ticket 54** |
+| 72 | case-lifecycle: 10 min soft message, 30 min re-broadcast and email offer; rebroadcast-takeover: closed before 30 min (-1 s, exactly, +1 s), any agent can open and claim after, one winner, holder reply ends it, page carries no content; console | Proven |
 | 73 | handoff: "the agent resolves the case"; case-lifecycle: "inactive cases auto-resolve at 24 hours exactly" | Proven |
 
 ## Safety and trust
@@ -150,10 +150,10 @@ Stories 95 and 96 (scoreboard, scripted replay) belong to the later phases (tick
 
 96 core stories (1-94, 97, 98), counted from the tables above:
 
-- **71 proven** by a test (a few carry a note, see the tables).
+- **72 proven** by a test (a few carry a note, see the tables).
 - **11 proven (wiring)**: 1, 2, 3, 4, 6, 12, 27, 31, 77, 79, 80. Real-model behaviour waits for ticket 34.
 - **3 proven in jsdom or in part only**: 37, 38 (real browser, ticket 57 and the portal checklist) and 86 (live test server run is the owner's).
-- **6 proven, with a ticketed limit**: 32 (ticket 56), 35 and 40 (ticket 58), 59 (ticket 55, owner decision), 72 (ticket 54), 81 (ticket 59).
+- **5 proven, with a ticketed limit**: 32 (ticket 56), 35 and 40 (ticket 58), 59 (ticket 55, owner decision), 81 (ticket 59).
 - **5 gaps**: 7 (ticket 52), 11 (ticket 34), 16 (ticket 61), 22 (ticket 53), 94 (ticket 34, open).
 
 Two of the five gaps (11 and 94) are the same thing: the EN/FR eval harness (ticket 34) is not built, so no number exists yet for how the real model behaves through the service.

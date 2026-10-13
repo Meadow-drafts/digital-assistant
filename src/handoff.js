@@ -98,7 +98,7 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
   const overdueText = (c, agent) => ({
     to: agent.email,
     subject: `[${c.ref}] ${c.priority ? 'PRIORITY ' : ''}Customer waiting for a reply`,
-    body: `A customer is waiting for a reply on a case that has an agent.\nCase: ${c.ref}\nConversation: ${c.conversationId}\nOpen: ${consoleUrl}?case=${c.ref}`,
+    body: `A customer is waiting for a reply on a case that has an agent. Any agent can open it and take it over.\nCase: ${c.ref}\nConversation: ${c.conversationId}\nOpen: ${consoleUrl}?case=${c.ref}`,
   });
   // Mail to the agent who holds the case: a sentence of ours, the link and the conversation id.
   const holderText = (c, subject, line) => ({
@@ -115,6 +115,7 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
     const gen = c.silenceGen;
     c.awaitingAgent = true;
     c.followUpOffered = false;
+    c.openToPool = false; // a new clock means somebody is on it again: the case is closed to the pool
     const live = () => c.state === 'with_agent' && c.silenceGen === gen;
     clock.setTimeout(async () => {
       if (!live()) return;
@@ -124,6 +125,7 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
     clock.setTimeout(async () => {
       if (!live()) return;
       c.followUpOffered = true;
+      c.openToPool = true; // from this moment any agent can open and claim it; set before the first await
       notify(c, FOLLOW_UP);
       await page(c, agents.list, 'case_rebroadcast', overdueText);
     }, timers.agentFollowUpMs);
@@ -132,6 +134,7 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
     c.silenceGen = (c.silenceGen ?? 0) + 1;
     c.awaitingAgent = false;
     c.followUpOffered = false;
+    c.openToPool = false; // the holder replied: it is theirs alone again
   }
   function touch(c) {
     c.activityGen = (c.activityGen ?? 0) + 1;
@@ -328,16 +331,23 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
     return null;
   }
 
-  const row = (c) => ({
+  // A held case is closed to every agent but the holder, until the 30-minute re-broadcast opens it to the pool.
+  const isOpenToPool = (c) => c.state === 'with_agent' && c.openToPool === true;
+  const mayOpen = (c, agent) => !c.agent || c.agent.id === agent.id || isOpenToPool(c);
+
+  const row = (c, agent) => ({
     ref: c.ref, state: c.state, priority: Boolean(c.priority), claimedBy: c.agent?.name ?? null, closeReason: c.closeReason,
     waitingSeconds: c.state === 'waiting' ? Math.floor((clock.now() - c.openedAt) / 1000) : null,
+    // Can this agent claim it now: unclaimed, or re-broadcast after 30 minutes of the holder's silence (not the holder).
+    claimable: c.state === 'waiting' || (isOpenToPool(c) && c.agent.id !== agent?.id),
   });
 
   function agentCases(req, res) {
-    if (!agentOf(req, res)) return;
+    const agent = agentOf(req, res);
+    if (!agent) return;
     // Priority cases first, then newest first.
     const ordered = store.all().reverse().sort((x, y) => Number(Boolean(y.priority)) - Number(Boolean(x.priority)));
-    json(res, 200, { cases: ordered.map(row) });
+    json(res, 200, { cases: ordered.map((c) => row(c, agent)) });
   }
 
   const MAX_TEXT = 1000;
@@ -347,11 +357,11 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
     if (!c) { json(res, 404, { error: 'not_found' }); return; }
     // A case somebody has claimed (or handled) is theirs alone; a colleague learns only who has it. Unclaimed cases
     // are open to the pool, which is who gets paged. A transfer (ticket 30) hands the case over by changing c.agent.
-    if (c.agent && c.agent.id !== agent.id) { json(res, 403, { error: 'not_your_case', claimedBy: c.agent.name }); return; }
+    if (!mayOpen(c, agent)) { json(res, 403, { error: 'not_your_case', claimedBy: c.agent.name }); return; }
     if (c.agent?.id === agent.id) agentSeen(c);
     await c.summaryPending;
     json(res, 200, {
-      ...row(c), conversationId: c.conversationId, linkedTo: c.linkedTo,
+      ...row(c, agent), conversationId: c.conversationId, linkedTo: c.linkedTo,
       colleagues: agents.list.filter((a) => a.id !== agent.id).map(({ id, name }) => ({ id, name })), draft: c.draft ?? null,
       summary: c.summary ? { text: c.summary.text, label: SUMMARY_LABEL[c.language], regenerated: c.summary.regenerated } : null,
       records: c.records ?? null,
@@ -425,7 +435,24 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
     json(res, 200, { ref, state: 'with_agent', claimedBy: target.name });
   }
 
+  // A re-broadcast case: the first colleague to claim takes it over. The customer is told in the same neutral words as
+  // for a transfer, the previous holder is out, and the new holder starts with a fresh clock.
+  async function takeOverCase(res, agent, ref) {
+    const taken = store.takeOver(ref, agent);
+    if (!taken.ok) { json(res, taken.reason === 'not_found' ? 404 : 409, { error: taken.reason }); return; }
+    const c = taken.case;
+    add(c, 'system', `Case taken over by ${agent.name} from ${taken.from.name} after the re-broadcast.`);
+    notify(c, TRANSFERRED);
+    agentSeen(c);
+    awaitAgent(c);
+    touch(c);
+    await record(c, 'case_claimed_after_rebroadcast', { fromAgent: taken.from.id, toAgent: agent.id });
+    json(res, 200, { ref, state: 'with_agent', claimedBy: agent.name });
+  }
+
   async function claimCase(res, agent, ref) {
+    const held = store.get(ref);
+    if (held && isOpenToPool(held) && held.agent.id !== agent.id) { await takeOverCase(res, agent, ref); return; }
     const claimed = store.claim(ref, agent);
     if (!claimed.ok) { json(res, claimed.reason === 'not_found' ? 404 : 409, { error: claimed.reason }); return; }
     // The summary dates from the handoff. It is made again only if the bot answered the customer after that.

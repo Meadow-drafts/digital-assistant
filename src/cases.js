@@ -27,6 +27,20 @@ export function createCaseStore({ clock }) {
       c.claimedAt = clock.now();
       return { ok: true, case: c };
     },
+    // After the 30-minute re-broadcast a held case is open to the pool (c.openToPool). The first colleague to take it wins:
+    // one check and one write with no await between them, and the write closes the open state, so a second take-over
+    // sees a case that is no longer open. The history, draft, summary, records and priority stay on the case.
+    takeOver(ref, agent) {
+      const c = cases.get(ref);
+      if (!c) return { ok: false, reason: 'not_found' };
+      if (c.state !== 'with_agent' || !c.openToPool || c.agent.id === agent.id) return { ok: false, reason: 'already_claimed' };
+      const from = c.agent;
+      c.transfers.push({ from: from.id, to: agent.id, at: clock.now() });
+      c.agent = agent;
+      c.openToPool = false;
+      c.claimedAt = clock.now();
+      return { ok: true, case: c, from };
+    },
     // A customer who asks again inside the window gets the same case back, with the agent who had it.
     reopen(c) {
       c.state = 'with_agent';
