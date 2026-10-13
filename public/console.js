@@ -160,11 +160,16 @@ $('login-form').addEventListener('submit', async (e) => {
 $('logout').addEventListener('click', signOut);
 
 // Audit log reader (authorised staff only; the service refuses everyone else). Read only, set as text.
+function auditFilters() {
+  const query = new URLSearchParams();
+  for (const [name, role] of [['conversationId', 'audit-conversation'], ['outcome', 'audit-outcome'], ['from', 'audit-from'], ['to', 'audit-to']]) {
+    if ($(role).value.trim()) query.set(name, $(role).value.trim());
+  }
+  return query;
+}
 async function loadAudit() {
   $('audit-error').textContent = '';
-  const query = new URLSearchParams();
-  if ($('audit-conversation').value.trim()) query.set('conversationId', $('audit-conversation').value.trim());
-  if ($('audit-outcome').value.trim()) query.set('outcome', $('audit-outcome').value.trim());
+  const query = auditFilters();
   const res = await api('GET', `/agent/audit${query.size ? `?${query}` : ''}`);
   if (!res.ok) { $('audit-error').textContent = res.status === 403 ? 'You are not authorised to read the audit log.' : 'Could not load the audit log.'; $('audit-rows').replaceChildren(); return; }
   const detail = (r) => Object.entries(r)
@@ -181,6 +186,23 @@ async function loadAudit() {
     return row;
   }));
 }
+// The export file for the filters on screen. Fetched with the session token, then handed to the browser as a download.
+async function exportAudit(format) {
+  $('audit-error').textContent = '';
+  const query = auditFilters();
+  query.set('format', format);
+  const res = await fetch(`/agent/audit/export?${query}`, { headers: { authorization: `Bearer ${token}` } }).catch(() => null);
+  if (!res || !res.ok) { $('audit-error').textContent = res?.status === 403 ? 'You are not authorised to export the audit log.' : 'Could not export the audit log.'; return; }
+  const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? `audit.${format}`;
+  const url = URL.createObjectURL(new Blob([await res.text()], { type: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/json;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+$('audit-export-csv').addEventListener('click', () => exportAudit('csv'));
+$('audit-export-json').addEventListener('click', () => exportAudit('json'));
 $('audit-open').addEventListener('click', () => { $('audit-panel').hidden = false; loadAudit(); });
 $('audit-close').addEventListener('click', () => { $('audit-panel').hidden = true; });
 $('audit-form').addEventListener('submit', (e) => { e.preventDefault(); loadAudit(); });

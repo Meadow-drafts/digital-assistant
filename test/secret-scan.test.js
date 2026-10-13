@@ -113,12 +113,18 @@ async function drive(t) {
   events.push((await aline.reply(ref, 'Any news from your side?')).body);
   const detail = await aline.open(ref);
   const audited = await call(svc.baseUrl, 'GET', '/agent/audit?limit=500', { token: aline.token });
+  // The export files, downloaded by the same reader: they must hold no more than the reader shows.
+  const file = (format) => fetch(`${svc.baseUrl}/agent/audit/export?format=${format}`, { headers: { authorization: `Bearer ${aline.token}` } }).then((r) => r.text());
+  const exportedJson = await file('json');
+  const exportedCsv = await file('csv');
 
   return {
-    svc, ref,
+    svc, ref, audited, exportedJson, exportedCsv,
     surfaces: {
       'the audit log': JSON.stringify(svc.audit.records),
       'the audit reader': JSON.stringify(audited.body),
+      'the audit export (JSON)': exportedJson,
+      'the audit export (CSV)': exportedCsv,
       'the logs': [...logged, ...mailLog].join('\n'),
       'the failed-question log': JSON.stringify(svc.failedQuestions.records),
       'the model input': JSON.stringify(svc.model.calls),
@@ -136,7 +142,7 @@ test('no PIN, OTP, card number, token or PIN hash appears in the audit, the logs
     for (const [name, pattern] of LEAK) assert.doesNotMatch(text, pattern, `${name} is in ${surface}`);
   }
   // the forwarded token and the full account number never get into what is stored or sent either
-  const stored = ['the audit log', 'the audit reader', 'the logs', 'the failed-question log', 'the email bodies', 'the agent console'];
+  const stored = ['the audit log', 'the audit reader', 'the audit export (JSON)', 'the audit export (CSV)', 'the logs', 'the failed-question log', 'the email bodies', 'the agent console'];
   const a = alice();
   for (const surface of stored) {
     assert.ok(!surfaces[surface].includes(a.token), `the session token is in ${surface}`);
@@ -157,4 +163,19 @@ test('no PIN, OTP, card number, token or PIN hash appears in the audit, the logs
   assert.ok(svc.failedQuestions.records.length >= 1, 'failed question');
   assert.ok(svc.model.calls.some((c) => c.purpose === 'summary'), 'summary');
   assert.ok(svc.mailer.outbox.length >= 3, 'paging and customer emails were sent');
+});
+
+test('the audit export files from the scan conversation are real, carry the reader\'s records, and hold none of the secrets', async (t) => {
+  const { audited, exportedJson, exportedCsv } = await drive(t);
+
+  const records = JSON.parse(exportedJson);
+  assert.ok(records.length > 20, 'the export is not an empty file that trivially passes the search');
+  assert.ok(records.length <= 500, 'small enough for the reader to show it all');
+  assert.deepEqual(records, audited.body.records, 'same masked records as the reader');
+  assert.match(exportedCsv.split('\r\n')[0], /^time,user,tenant,conversationId,outcome,/);
+  assert.ok(exportedCsv.split('\r\n').length > records.length, 'one CSV row per record');
+  for (const [name, pattern] of LEAK) {
+    assert.doesNotMatch(exportedJson, pattern, `${name} is in the JSON export`);
+    assert.doesNotMatch(exportedCsv, pattern, `${name} is in the CSV export`);
+  }
 });

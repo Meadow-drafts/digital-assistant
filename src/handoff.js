@@ -311,6 +311,25 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
   // Only staff named in agents.auditReaders may read the audit log; being an agent is not enough.
   const canReadAudit = (agent) => (agents?.auditReaders ?? []).includes(agent.id);
   const MAX_AUDIT_ROWS = 500;
+  // The filters the reader and the export share: one parser and one read, so the export can never hold more than the reader can show.
+  // `from` and `to` are an ISO date or date-time; a bare `to` date includes that whole day.
+  const auditFilter = (url) => {
+    const param = (name) => url.searchParams.get(name) || undefined;
+    const bound = (name, endOfDay) => {
+      const raw = param(name);
+      if (raw === undefined) return {};
+      const ms = Date.parse(raw);
+      if (Number.isNaN(ms)) return { bad: name };
+      return { ms: endOfDay && /^\d{4}-\d\d-\d\d$/.test(raw) ? ms + 24 * 60 * 60_000 - 1 : ms };
+    };
+    const from = bound('from', false);
+    const to = bound('to', true);
+    if (from.bad || to.bad) return { error: 'bad_date' };
+    return {
+      filter: { from: param('from') ?? null, to: param('to') ?? null, conversationId: param('conversationId') ?? null, outcome: param('outcome') ?? null },
+      query: { conversationId: param('conversationId'), outcome: param('outcome'), ...(from.ms === undefined ? {} : { fromMs: from.ms }), ...(to.ms === undefined ? {} : { toMs: to.ms }) },
+    };
+  };
   async function auditView(req, res, url) {
     const agent = agentOf(req, res);
     if (!agent) return;
@@ -318,8 +337,45 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
     if (!canReadAudit(agent)) { json(res, 403, { error: 'not_authorised' }); return; }
     const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : 100;
     if (!Number.isInteger(limit) || limit < 1 || limit > MAX_AUDIT_ROWS) { json(res, 400, { error: 'bad_limit' }); return; }
-    const records = await audit.read({ conversationId: url.searchParams.get('conversationId') || undefined, outcome: url.searchParams.get('outcome') || undefined, limit });
-    json(res, 200, { records });
+    const parsed = auditFilter(url);
+    if (parsed.error) { json(res, 400, { error: parsed.error }); return; }
+    json(res, 200, { records: await audit.read({ ...parsed.query, limit }) });
+  }
+
+  // CSV columns: the common fields first, then every other field in the order it first appears. Cells that a spreadsheet
+  // would run as a formula (customer text can start with = + - @) get a leading quote.
+  const LEAD_COLUMNS = ['time', 'user', 'tenant', 'conversationId', 'outcome'];
+  const csvCell = (value) => {
+    if (value === undefined || value === null) return '';
+    let text = typeof value === 'string' ? value : JSON.stringify(value);
+    if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+    return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+  };
+  const toCsv = (records) => {
+    const columns = [...LEAD_COLUMNS];
+    for (const r of records) for (const k of Object.keys(r)) if (!columns.includes(k)) columns.push(k);
+    return [columns.join(','), ...records.map((r) => columns.map((c) => csvCell(r[c])).join(','))].map((l) => `${l}\r\n`).join('');
+  };
+  // Download of the audit log for review. Same authorisation, same records and same masking as the reader; the export
+  // itself is written to the audit log (who, when, which filter, how many records) before the file is sent.
+  async function auditExport(req, res, url) {
+    const agent = agentOf(req, res);
+    if (!agent) return;
+    if (req.method !== 'GET') { json(res, 405, { error: 'read_only' }); return; }
+    if (!canReadAudit(agent)) { json(res, 403, { error: 'not_authorised' }); return; }
+    const format = url.searchParams.get('format') ?? 'json';
+    if (format !== 'json' && format !== 'csv') { json(res, 400, { error: 'bad_format' }); return; }
+    const parsed = auditFilter(url);
+    if (parsed.error) { json(res, 400, { error: parsed.error }); return; }
+    const records = await audit.read({ ...parsed.query, limit: Infinity });
+    await audit.append({ user: `agent:${agent.id}`, tenant: null, conversationId: null, outcome: 'audit_exported', agent: agent.id, format, filter: parsed.filter, records: records.length });
+    const body = format === 'csv' ? toCsv(records) : JSON.stringify(records, null, 2);
+    const stamp = new Date(clock.now()).toISOString().slice(0, 10);
+    res.writeHead(200, {
+      'content-type': format === 'csv' ? 'text/csv; charset=utf-8' : 'application/json; charset=utf-8',
+      'content-disposition': `attachment; filename="audit-${stamp}.${format}"`,
+      'cache-control': 'no-store',
+    }).end(body);
   }
 
   // The logged-in agent, or a 401 that says nothing else.
@@ -484,6 +540,7 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
     if (req.method === 'POST' && url.pathname === '/case/cancel') { await cancelCase(req, res); return true; }
     if (req.method === 'POST' && url.pathname === '/case/feedback') { await solvedFeedback(req, res); return true; }
     if (req.method === 'POST' && url.pathname === '/agent/login') { await agentLogin(req, res); return true; }
+    if (url.pathname === '/agent/audit/export') { await auditExport(req, res, url); return true; }
     if (url.pathname === '/agent/audit') { await auditView(req, res, url); return true; }
     if (req.method === 'GET' && url.pathname === '/agent/cases') { agentCases(req, res); return true; }
     const target = /^\/agent\/cases\/([A-Za-z0-9-]{1,20})(?:\/(claim|messages|resolve|transfer))?$/.exec(url.pathname);

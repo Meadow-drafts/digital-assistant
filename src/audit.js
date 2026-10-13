@@ -71,9 +71,10 @@ export function createAuditTrail({ sink, clock }) {
         ...fixed,
       });
     },
-    // Newest first. Filters are exact matches; `limit` caps the number returned.
-    async read({ conversationId, outcome, limit = 200 } = {}) {
-      const records = (await sink.all()).filter((r) => (!conversationId || r.conversationId === conversationId) && (!outcome || r.outcome === outcome));
+    // Newest first. Filters are exact matches; `fromMs` and `toMs` bound the record time (inclusive); `limit` caps the number returned.
+    async read({ conversationId, outcome, fromMs = -Infinity, toMs = Infinity, limit = 200 } = {}) {
+      const inRange = (r) => { const at = Date.parse(r.time); return at >= fromMs && at <= toMs; };
+      const records = (await sink.all()).filter((r) => (!conversationId || r.conversationId === conversationId) && (!outcome || r.outcome === outcome) && inRange(r));
       return records.reverse().slice(0, limit);
     },
     purge: (beforeMs) => sink.purge(beforeMs),

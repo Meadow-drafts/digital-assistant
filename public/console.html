@@ -58,7 +58,11 @@
       <form data-role="audit-form" class="row">
         <input data-role="audit-conversation" type="text" placeholder="Conversation id" aria-label="Conversation id" />
         <input data-role="audit-outcome" type="text" placeholder="Outcome, e.g. case_claimed" aria-label="Outcome" />
+        <input data-role="audit-from" type="date" aria-label="From date" />
+        <input data-role="audit-to" type="date" aria-label="To date" />
         <button type="submit">Show</button>
+        <button data-role="audit-export-csv" type="button">Download CSV</button>
+        <button data-role="audit-export-json" type="button">Download JSON</button>
         <button data-role="audit-close" type="button">Close</button>
       </form>
       <p class="error" data-role="audit-error" role="alert"></p>
