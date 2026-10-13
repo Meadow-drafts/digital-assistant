@@ -127,6 +127,28 @@ test('after resolution the customer sees "Was this solved?" and can answer', asy
   assert.deepEqual(svc.audit.records.filter((e) => e.outcome === 'case_feedback').map((e) => e.solved), [true]);
 });
 
+test('answering "No" is a button that goes to the service and brings the same case back with its agent', async (t) => {
+  const svc = await startService({ model: createFakeModel(['Hi there.']) });
+  t.after(svc.close);
+  const w = await askForAgent(svc, t);
+  const ref = refOf(w);
+  const aline = await agentLogin(svc.baseUrl, 'aline');
+  await aline.claim(ref);
+  await aline.resolve(ref);
+  await w.until(() => w.q('solved-prompt') && !w.q('solved-prompt').hidden);
+
+  const no = w.q('solved-no');
+  assert.equal(no.tagName, 'BUTTON');
+  assert.match(no.textContent, /^no$/i);
+  no.click();
+  await w.until(() => w.q('solved-prompt').hidden && !w.q('case-banner').hidden);
+
+  assert.deepEqual(svc.audit.records.filter((e) => e.outcome === 'case_feedback').map((e) => [e.caseRef, e.solved]), [[ref, false]]);
+  assert.equal(refOf(w), ref, 'the same case, not a new one');
+  assert.match(w.q('case-state').textContent, /with an agent/i);
+  assert.equal((await aline.open(ref)).body.state, 'with_agent');
+});
+
 test('in French the banner, notice and prompt are French', async (t) => {
   const svc = await startService({ model: createFakeModel(['Bonjour.']) });
   t.after(svc.close);

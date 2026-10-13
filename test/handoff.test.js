@@ -280,10 +280,10 @@ test('the customer answers "Was this solved?" once the case is resolved, and not
   assert.equal((await c.feedback(true)).status, 409, 'not while the agent still has it');
   await who.resolve(ref);
   assert.equal((await c.feedback('maybe')).status, 400);
-  assert.equal((await c.feedback(false)).status, 200);
+  assert.equal((await c.feedback(true)).status, 200);
 
   const answered = svc.audit.records.filter((e) => e.outcome === 'case_feedback');
-  assert.deepEqual(answered.map((e) => [e.caseRef, e.solved]), [[ref, false]]);
+  assert.deepEqual(answered.map((e) => [e.caseRef, e.solved]), [[ref, true]]);
   assert.equal((await c.status()).body.askSolved, false, 'the prompt goes away once answered');
 });
 

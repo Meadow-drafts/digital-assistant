@@ -253,6 +253,89 @@ test('a reopened case keeps its history and can be resolved and reopened again',
   assert.ok(transcript.some((m) => m.from === 'system' && /reopened/i.test(m.text)));
 });
 
+// ---- answering "No" to "Was this solved?" (ticket 55) ----
+
+test('"No" 72 hours minus one second after resolution reopens the same case, with the agent state and silence clock reset', async (t) => {
+  const { svc, c, ref, aline } = await resolvedCase(t);
+  await svc.clock.advance(72 * HOUR - SEC);
+  const mails = svc.mailer.outbox.length;
+
+  const res = await c.feedback(false);
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.ref, ref);
+  assert.equal(res.body.state, 'with_agent');
+  assert.deepEqual(res.body.agent, { firstName: 'Aline', human: true });
+  const status = (await c.status()).body;
+  assert.equal(status.state, 'with_agent');
+  assert.notEqual(status.askSolved, true);
+  assert.equal((await aline.open(ref)).body.state, 'with_agent');
+  assert.deepEqual(svc.audit.records.filter((r) => r.outcome === 'case_feedback').map((r) => [r.caseRef, r.solved]), [[ref, false]]);
+  assert.equal(svc.audit.records.filter((r) => r.outcome === 'case_reopened' && r.caseRef === ref).length, 1);
+  assert.equal(svc.mailer.outbox.slice(mails)[0].to, 'aline@bank.test', 'the agent who had it is told, like a chip click');
+  // The silence clock restarted at the reopen.
+  const before = (await notices(c)).length;
+  await svc.clock.advance(10 * MIN - SEC);
+  assert.equal((await notices(c)).length, before);
+  await svc.clock.advance(SEC);
+  assert.match((await notices(c)).at(-1), /still working on it/i);
+});
+
+test('"No" exactly 72 hours after resolution still reopens the same case (the boundary is the chip\'s)', async (t) => {
+  const { svc, c, ref } = await resolvedCase(t);
+  await svc.clock.advance(72 * HOUR);
+  assert.equal((await c.feedback(false)).body.ref, ref);
+});
+
+test('"No" 72 hours plus one second after resolution opens a new case linked to the old one', async (t) => {
+  const { svc, c, ref, aline } = await resolvedCase(t);
+  await svc.clock.advance(72 * HOUR + SEC);
+
+  const res = await c.feedback(false);
+
+  assert.equal(res.status, 200);
+  assert.notEqual(res.body.ref, ref);
+  assert.equal(res.body.state, 'waiting');
+  assert.equal((await aline.open(res.body.ref)).body.linkedTo, ref);
+  assert.equal((await aline.open(ref)).body.state, 'resolved', 'the old case stays closed');
+});
+
+test('"Yes" keeps the case resolved, at any time', async (t) => {
+  const { svc, c, ref, aline } = await resolvedCase(t);
+  await svc.clock.advance(HOUR);
+
+  assert.equal((await c.feedback(true)).status, 200);
+
+  assert.equal((await c.status()).body.state, 'resolved');
+  assert.equal((await aline.open(ref)).body.state, 'resolved');
+  assert.equal(svc.audit.records.filter((r) => r.outcome === 'case_reopened').length, 0);
+});
+
+test('a plain chat message inside the window goes to the bot and does not reopen the case', async (t) => {
+  const { svc, c, ref, aline } = await resolvedCase(t);
+  await svc.clock.advance(HOUR);
+
+  await c.say('you did not fix it');
+
+  assert.equal((await c.status()).body.state, 'resolved');
+  assert.equal((await aline.open(ref)).body.state, 'resolved');
+  assert.equal(svc.audit.records.filter((r) => r.outcome === 'case_reopened').length, 0);
+});
+
+test('"No" never reopens a case the customer cancelled', async (t) => {
+  const svc = await startService({ model: createFakeModel(['ok']) });
+  t.after(svc.close);
+  const c = await customer(svc.baseUrl);
+  const ref = (await c.handoff()).body.ref;
+  await c.cancel();
+
+  assert.equal((await c.feedback(false)).status, 409);
+
+  assert.equal((await c.status()).body.state, 'bot');
+  const aline = await agentLogin(svc.baseUrl, 'aline');
+  assert.equal((await aline.open(ref)).body.state, 'resolved');
+});
+
 // ---- transfer ----
 
 test('an agent transfers a case to a colleague: the colleague gets the whole case, the first agent is out', async (t) => {

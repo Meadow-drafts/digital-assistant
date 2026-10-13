@@ -425,9 +425,15 @@ class BankAssistant extends HTMLElement {
   }
 
   async answerSolved(solved) {
-    try { await this.caseCall('POST', '/case/feedback', { conversationId: this.conversationId, solved }); } catch { /* the prompt goes either way */ }
+    let res = null;
+    try { res = await this.caseCall('POST', '/case/feedback', { conversationId: this.conversationId, solved }); } catch { /* the prompt goes either way */ }
     this.q('solved-prompt').hidden = true;
     this.addNote(TEXT[this.lang].thanks);
+    // "No" asks for a person again: the service answers with the case that is now open, as it does for the chip.
+    if (!solved && res?.ok && res.body?.state) {
+      this.cursor = 0;
+      this.applyCase(res.body);
+    }
   }
 
   // Takes a case view from the service: the banner, the agent's new messages, and what to poll next.

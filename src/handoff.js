@@ -403,7 +403,8 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
   async function solvedFeedback(req, res) {
     let body;
     try { body = await readJson(req); } catch { json(res, 400, { error: 'bad_request' }); return; }
-    if (!ownConversation(req, res, body?.conversationId)) return;
+    const conversation = ownConversation(req, res, body?.conversationId);
+    if (!conversation) return;
     const c = store.latestFor(body.conversationId);
     if (c?.state !== 'resolved' || c.solved !== null || c.closeReason !== 'resolved_by_agent') { json(res, 409, { error: 'not_asked' }); return; }
     if (typeof body.solved !== 'boolean') { json(res, 400, { error: 'bad_request' }); return; }
@@ -412,7 +413,13 @@ export function createHandoff({ clock, audit, mailer, agents, support, consoleUr
       time: new Date(clock.now()).toISOString(), user: c.owner, tenant: c.tenant, conversationId: c.conversationId,
       userText: '', replyText: '', outcome: 'case_feedback', caseRef: c.ref, solved: c.solved,
     });
-    json(res, 200, { ok: true });
+    if (c.solved) { json(res, 200, { ok: true }); return; }
+    // "No" asks for a person again, exactly like the chip: inside the window the same case comes back, later a new linked one.
+    // (A resolved_by_agent case is never a cancelled one, so the reopenable rule's cancelled exception cannot apply here.)
+    let current = c;
+    if (reopenable(c)) await reopen(c);
+    else current = await startCase({ conversationId: c.conversationId, conversation, owner: c.owner, tenant: c.tenant, req });
+    json(res, 200, { ok: true, conversationId: c.conversationId, ...view(current) });
   }
 
   // The holder hands the case to a colleague. It is the same case: transcript, draft, summary, records and priority
