@@ -306,6 +306,31 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     reply(200, { ok: true });
   }
 
+  // Read-only help discovery. Keep guide contents on the server and derive the
+  // list from the same session entitlements used by chat before exposing titles.
+  async function handleHelpTopics(req, res) {
+    const reply = (status, payload) => res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(payload));
+    const who = identity.resolve(req);
+    if (who.error || !who.verified) { reply(401, { error: who.error ?? 'session_required' }); return; }
+    if (!guides) { reply(200, { topics: [], context: null }); return; }
+    const url = new URL(req.url, 'http://localhost');
+    const lang = url.searchParams.get('language') === 'fr' ? 'fr' : 'en';
+    const conversationId = url.searchParams.get('conversationId');
+    const conversation = typeof conversationId === 'string' ? conversations.get(conversationId) : null;
+    if (!conversation || conversation.owner !== who.owner || !conversation.session) { reply(404, { error: 'not_found' }); return; }
+    const ent = await entitlementsFor(req, conversation.session.tenant, conversation);
+    const available = guides.availableFor(ent).filter((guide) => guide.customerCatalogue);
+    const topics = available.map((guide) => ({ key: guide.id, title: guide[lang].title }));
+    const path = url.searchParams.get('path');
+    const route = navigation && [...navigation.routes].find(([, item]) => item.path === path);
+    const contextGuides = route ? available.filter((guide) => guide.route === path || guide.route?.startsWith(`${path.replace(/\/$/, '')}/`)) : [];
+    const context = route && contextGuides.length ? {
+      label: route[1].labels[lang] ?? route[1].labels.en,
+      topics: contextGuides.map((guide) => ({ key: guide.id, title: guide[lang].title })),
+    } : null;
+    reply(200, { topics, context });
+  }
+
   // Turns by owner and message id, so a retry after a dropped connection gets the same reply instead of a second run
   // (one history entry, one audit record, one rate-limit charge). Kept in memory for a short while: the bytes sent are
   // the same ones the customer already received.
@@ -622,7 +647,8 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
           }
           if (complaint && !pendingTransfer) transferReply = HISTORY_HELP[language];
         }
-        const selected = pendingClarification?.guideIds
+        const requestedGuide = typeof body.guideKey === 'string' ? available.find((guide) => guide.id === body.guideKey && guide.customerCatalogue) : null;
+        const selected = requestedGuide ?? pendingClarification?.guideIds
           .map((id) => available.find((guide) => guide.id === id))
           .find((guide) => guide && normalizeChoiceText(guide[language].title, language) === normalizeChoiceText(message, language));
         let routed = transferTool
@@ -840,6 +866,10 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     }
     if (req.method === 'POST' && req.url === '/feedback') {
       handleAnswerFeedback(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end(); });
+      return;
+    }
+    if (req.method === 'GET' && req.url.startsWith('/help/topics?')) {
+      handleHelpTopics(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end(); });
       return;
     }
     const file = req.method === 'GET' ? STATIC[req.url.split('?')[0]] : undefined;

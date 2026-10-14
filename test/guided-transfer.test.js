@@ -155,8 +155,10 @@ test('customer-selected reference help makes no lookup or case change; selecting
   await widget.until(() => widget.q('thinking').hidden && /When did you send/.test(widget.qa('message').at(-1)?.textContent ?? ''));
   await widget.send('This morning.');
   await widget.until(() => widget.q('thinking').hidden && widget.qa('quick-reply').length === 3);
+  const userTurnsBeforeChip = widget.qa('message').filter((message) => message.dataset.from === 'user').length;
   widget.qa('quick-reply').at(-3).click();
-  await widget.until(() => widget.q('thinking').hidden && widget.qa('message').some((message) => message.dataset.from === 'user' && message.textContent === 'Where do I find the reference?'));
+  assert.equal(widget.q('input').value, 'Where do I find the reference?');
+  assert.equal(widget.qa('message').filter((message) => message.dataset.from === 'user').length, userTurnsBeforeChip);
 
   assert.equal(service.gateway.calls.some((call) => call.path === '/digitalbank/history/bipay-recent'), false);
   assert.equal(service.mailer.outbox.length, 0);

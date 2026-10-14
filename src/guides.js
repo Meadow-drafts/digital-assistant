@@ -96,6 +96,7 @@ export function loadGuides(dirArg) {
       const text = inject(body, glossary[lang], `${id}.${lang}.md`);
       entry[lang] = { title: /^# (.+)$/m.exec(text)?.[1] ?? id, text, closing: closingOf(text) };
       if (lang === 'en') {
+        entry.customerCatalogue = Boolean(meta['verified-on']) && !/^DRAFT\b/i.test(meta['verified-on']);
         entry.packages = packagesOf(meta.package ?? '');
         entry.route = /^\/[A-Za-z0-9\-/]*/.exec(meta.route ?? '')?.[0] ?? null; // the first plain path, if the guide names one
         entry.primaryOnly = /\(primary connect only\)/.test(meta.audience ?? '');
