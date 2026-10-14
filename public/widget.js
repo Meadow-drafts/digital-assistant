@@ -191,6 +191,7 @@ const SLOW_MS = 8000; // no byte for this long: say so
 const STALL_MS = 30000; // no byte for this long: give up on the request and retry it
 const newId = () => (globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`);
 const lost = (e) => Object.assign(e instanceof Error ? e : new Error(String(e)), { retriable: true });
+const transientStatus = (status) => status === 408 || status === 429 || status >= 500;
 const brandColor = (value) => {
   if (typeof value !== 'string') return null;
   const color = value.trim();
@@ -979,7 +980,7 @@ class BankAssistant extends HTMLElement {
         body: JSON.stringify({ cli, tenant: this.getAttribute('tenant'), gating, conversationId: this.conversationId }),
         signal,
       });
-      if (res.status >= 500 || res.status === 429) { this.sessionDown = true; return; }
+      if (transientStatus(res.status)) { this.sessionDown = true; return; }
       if (!res.ok) return;
       const started = await res.json();
       this.conversationId = started.conversationId;
@@ -1168,7 +1169,7 @@ class BankAssistant extends HTMLElement {
         });
       } catch (e) { throw lost(e); }
       if (res.status === 401) { this.dropSession(); expired = true; } // no silent retry: the next message starts a new session
-      if (res.status >= 500 || res.status === 429) throw lost(new Error(`HTTP ${res.status}`));
+      if (transientStatus(res.status)) throw lost(new Error(`HTTP ${res.status}`));
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
       for await (const ev of readEvents(res.body)) {
         arm();
