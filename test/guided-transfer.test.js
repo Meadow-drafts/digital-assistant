@@ -113,6 +113,29 @@ test('an unavailable own-wallet lookup makes no status claim and offers the exis
   assert.match(textOf(result.events), /cannot reach your bank data right now/i);
   assert.match(textOf(result.events), /talk to a human agent/i);
   assert.doesNotMatch(textOf(result.events), /pending|completed|failed/i);
+  assert.equal(result.events.find((event) => event.type === 'next_step').kind, 'human');
+  assert.deepEqual(result.events.find((event) => event.type === 'quick_replies').options, [
+    'Where do I find the reference?', 'Check another transfer', 'Talk to an agent',
+  ]);
+});
+
+test('a French guided reference check reports only the returned status and its safe next step', async (t) => {
+  const customer = alice();
+  customer.rows = [row(customer, { clientReferenceId: 'REF-FR', sta: '1000' })];
+  const service = await start({ customers: [customer], model: toolModel('[]', 'unused') });
+  t.after(service.close);
+  const conversationId = await begin(service, customer, { gating: { usePackages: true, pack: { natureCodes: ['HIST'] } } });
+
+  await say(service, customer, "J'ai envoyé l'argent, mais le destinataire ne l'a pas reçu.", conversationId);
+  await say(service, customer, 'Ce matin.', conversationId);
+  const result = await say(service, customer, 'La référence est REF-FR', conversationId);
+  assert.match(textOf(result.events), /encore en attente/i);
+  assert.match(textOf(result.events), /Ne réessayez pas/i);
+  assert.equal(result.events.find((event) => event.type === 'next_step').kind, 'history');
+  assert.deepEqual(result.events.find((event) => event.type === 'quick_replies').options, [
+    'Où trouver la référence ?', 'Vérifier un autre transfert', 'Parler à un agent',
+  ]);
+  assert.equal(service.gateway.calls.filter((call) => call.path === '/digitalbank/history/bipay-recent').length, 1);
 });
 
 test('customer-selected reference help makes no lookup or case change; selecting an agent reply uses the existing handoff', async (t) => {

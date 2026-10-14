@@ -95,7 +95,7 @@ const OUTCOMES = [
   { name: 'a pending transfer', over: { sta: '1000', msg: null }, next: 'history', chip: [],
     en: /still pending.*Do not retry it: check History first/, fr: /en attente.*Ne réessayez pas : vérifiez d'abord dans Historique/ },
   { name: 'a successful transfer', over: { sta: '01', msg: null }, next: 'history', chip: [],
-    en: /record reports transfer.*completed/, fr: /relevé de la banque indique.*terminé/ },
+    en: /went through: its status is successful/, fr: /a abouti : son statut est réussi/ },
   { name: 'a reversed transfer', over: { reversedAt: '2026-10-12T08:00:00.000+00:00' }, next: 'history', chip: [],
     en: /reversal on transfer.*2026-10-12/, fr: /annulation sur le transfert.*2026-10-12/ },
   { name: 'a re-debited transfer', over: { reDebited: true }, next: 'history', chip: [],
@@ -353,6 +353,6 @@ test('a numeric currency code from the bank is shown as XAF, as the portal does,
   for (const [dev, shown] of [['001', 'XAF'], ['59', 'XAF'], ['EUR', 'EUR']]) {
     const { events } = await ask(t, { rows: (a) => [status(a, { sta: '01', msg: null, dev })], message: MESSAGE.en, answer: 'unused' });
 
-    assert.match(textOf(events), new RegExp(`transfer REF-0001 \\(15000 ${shown},`));
+    assert.match(textOf(events), new RegExp(`REF-0001 \\(15000 ${shown},`));
   }
 });

@@ -50,8 +50,8 @@ const when = (d) => (d.reversedAt ? { en: ` on ${d.reversedAt}`, fr: ` le ${d.re
 // the History page is offered to this customer; when it is not, the text must not point to it.
 export const TEXT = {
   succeeded: {
-    en: (t) => `The bank's record reports transfer ${label(t)} as completed. That status alone does not confirm that the recipient's account was credited.`,
-    fr: (t) => `Le relevé de la banque indique que le transfert ${label(t)} est terminé. Ce statut seul ne confirme pas que le compte du destinataire a été crédité.`,
+    en: (t) => `Transfer ${label(t)} went through: its status is successful, so there is no failure to explain.`,
+    fr: (t) => `Le transfert ${label(t)} a abouti : son statut est réussi, il n'y a donc pas d'échec à expliquer.`,
   },
   pending: {
     en: (t, d, history) => `Transfer ${label(t)} is still pending (Payment Pending). Do not retry it${history ? ': check History first' : ''}.`,

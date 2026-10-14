@@ -70,6 +70,10 @@ const HISTORY_REFERENCE_HELP = {
   en: 'Open History and find the row for this transfer. Copy the transaction reference shown there (for example, ntrans or nhis) and paste it here. I will check only that reference against your wallet.',
   fr: "Ouvrez Historique et repérez la ligne de ce transfert. Copiez la référence de transaction affichée (par exemple ntrans ou nhis), puis collez-la ici. Je vérifierai uniquement cette référence dans votre portefeuille.",
 };
+const TRANSFER_QUICK_REPLIES = {
+  en: ['Where do I find the reference?', 'Check another transfer', 'Talk to an agent'],
+  fr: ['Où trouver la référence ?', 'Vérifier un autre transfert', 'Parler à un agent'],
+};
 const findSuppliedReference = (message) => {
   const explicit = TRANSFER_REFERENCE.exec(message)?.[1];
   if (explicit) return explicit;
@@ -566,9 +570,9 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
         if (next === 'human') chipReasons.push('contact_bank');
       } else {
         let text = outcome === 'not_found' ? EXPLAIN_TEXT.not_found[language](reference, historyOpen) : EXPLAIN_TEXT[outcome][language](t, d, historyOpen);
-        if (guidedTransfer && outcome === 'succeeded') text += language === 'fr'
-          ? ' Demandez au destinataire de vérifier son compte ; si le transfert manque toujours, un agent peut vous aider.'
-          : ' Ask the recipient to check their account; if it is still missing, a human agent can help.';
+        if (guidedTransfer && outcome === 'succeeded') text = language === 'fr'
+          ? `Le relevé de la banque indique que le transfert ${t.reference} est terminé. Ce statut seul ne confirme pas que le compte du destinataire a été crédité. Demandez au destinataire de vérifier son compte ; si le transfert manque toujours, un agent peut vous aider.`
+          : `The bank's record reports transfer ${t.reference} as completed. That status alone does not confirm that the recipient's account was credited. Ask the recipient to check their account; if it is still missing, a human agent can help.`;
         reply += text;
         send(res, 'delta', { text });
         if (OUTCOMES[outcome].chip) chipReasons.push(OUTCOMES[outcome].chip);
@@ -581,9 +585,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
       reply += text;
       send(res, 'delta', { text });
       send(res, 'next_step', { kind: next, ...(historyOpen ? { target: 'history', card: historyPage.card } : {}), text: text.trim() });
-      if (guidedTransfer) send(res, 'quick_replies', { options: language === 'fr'
-        ? ['Où trouver la référence ?', 'Vérifier un autre transfert', 'Parler à un agent']
-        : ['Where do I find the reference?', 'Check another transfer', 'Talk to an agent'] });
+      if (guidedTransfer) send(res, 'quick_replies', { options: TRANSFER_QUICK_REPLIES[language] });
     };
     try {
       if (guides) {
@@ -675,8 +677,8 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
           send(res, 'delta', { text });
           if (transfer.stage === 'reference' && canNavigate?.ok) send(res, 'action_card', canNavigate.card);
           if (transfer.stage === 'reference') send(res, 'quick_replies', { options: canNavigate?.ok
-            ? language === 'fr' ? ['Où trouver la référence ?', 'Vérifier un autre transfert', 'Parler à un agent'] : ['Where do I find the reference?', 'Check another transfer', 'Talk to an agent']
-            : language === 'fr' ? ['Parler à un agent'] : ['Talk to an agent'] });
+            ? TRANSFER_QUICK_REPLIES[language]
+            : [TRANSFER_QUICK_REPLIES[language][2]] });
           send(res, 'guides', { guides: [] });
         } else if (routed.tool) {
           // Without a gateway there is no session to read from: the customer is told to sign in, never that no guide matched.
@@ -708,6 +710,16 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
             send(res, 'delta', { text });
             if (!['session_expired', 'pin_required'].includes(done.code)) chipReasons.push(`tool_${done.code}`);
             if (guidedTransferLocked) chipReasons.push('contact_bank');
+            if (conversation.transferSupport?.stage === 'checking') {
+              conversation.transferSupport.stage = 'result';
+              const next = 'human';
+              const nextText = language === 'fr'
+                ? 'Prochaine étape : réessayez la vérification plus tard ou utilisez « Parler à un agent » pour obtenir de l’aide.'
+                : 'Next step: try the check again later or use “Talk to an agent” for help.';
+              reply += `\n\n${nextText}`;
+              send(res, 'next_step', { kind: next, text: nextText });
+              send(res, 'quick_replies', { options: TRANSFER_QUICK_REPLIES[language] });
+            }
           }
         } else {
           const used = picks.filter((id) => id !== UNSUPPORTED_ID).map((id) => guides.get(id));
