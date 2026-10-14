@@ -71,6 +71,7 @@ export function createCaseStore({ clock, database = null, agentById = () => null
     c.agent = agentFor(row.agent_id);
     c.transcript = messages.map((m) => ({ seq: m.seq, from: m.sender, text: m.text, at: m.at, ...(m.public ? { public: true } : {}) }));
     c.transfers ??= [];
+    c.notes ??= [];
     // A summary that was still being written when the process stopped is gone; let the claim try once more.
     if ((c.state === 'waiting' || c.state === 'with_agent') && !c.summary) c.summaryFailed = true;
     return c;
@@ -172,6 +173,14 @@ export function createCaseStore({ clock, database = null, agentById = () => null
     transfer(c, agent) {
       c.transfers.push({ from: c.agent.id, to: agent.id, at: clock.now() });
       c.agent = agent;
+    },
+    // An internal note: kept on the case itself (not in the transcript), so it travels with the case on a transfer. The array is
+    // replaced, not pushed to, so the durable store sees the change.
+    addNote(c, agent, text) {
+      const notes = c.notes ?? [];
+      const note = { id: `N-${notes.length + 1}`, agentId: agent.id, agent: agent.name, text, at: clock.now() };
+      c.notes = [...notes, note];
+      return note;
     },
     resolve(c, reason = 'resolved_by_agent') {
       c.state = 'resolved';

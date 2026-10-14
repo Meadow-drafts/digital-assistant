@@ -1,6 +1,7 @@
 // In-house support console. Plain page, no framework. Every value from the service is set as text.
 // The agent logs in with the demo config login; the session token lives in this page (and sessionStorage).
 const $ = (role) => document.querySelector(`[data-role="${role}"]`);
+const pageOpen = () => Boolean(document?.body?.isConnected);
 const STATE = { waiting: 'Waiting for an agent', with_agent: 'With an agent', resolved: 'Resolved', emailed: 'Emailed to support (no chat)' };
 
 let token = null;
@@ -13,14 +14,19 @@ let canReadAudit = false;
 try { token = sessionStorage.getItem('console:token'); me = sessionStorage.getItem('console:name'); canReadAudit = sessionStorage.getItem('console:audit') === '1'; } catch { /* no storage: sign in again */ }
 
 async function api(method, path, body) {
-  const res = await fetch(path, {
-    method,
-    headers: { ...(body ? { 'content-type': 'application/json' } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && token) signOut();
-  return { ok: res.ok, status: res.status, body: data };
+  try {
+    const res = await fetch(path, {
+      method,
+      headers: { ...(body ? { 'content-type': 'application/json' } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401 && token) signOut();
+    return { ok: res.ok, status: res.status, body: data };
+  } catch {
+    // Network loss (including a page closing with a poll in flight) is a failed request, not an unhandled event-handler rejection.
+    return { ok: false, status: 0, body: {} };
+  }
 }
 
 function signOut() {
@@ -51,6 +57,17 @@ const label = (c) => {
   return STATE[c.state] ?? c.state;
 };
 
+// m:ss, however long (a case can wait for hours).
+const clock = (seconds) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+const SLOW = { warning: ' · slow', urgent: ' · overdue' };
+
+// The colours are explained with the service's own thresholds, which come from its timer config.
+function renderThresholds(t) {
+  $('queue-thresholds').textContent = t
+    ? `Waiting for an agent: slow from ${clock(t.waiting.warnSeconds)}, overdue from ${clock(t.waiting.urgentSeconds)}. Waiting for a reply: slow from ${clock(t.withAgent.warnSeconds)}, overdue from ${clock(t.withAgent.urgentSeconds)}.`
+    : '';
+}
+
 function renderQueue(cases) {
   const queue = $('queue');
   queue.replaceChildren(...cases.map((c) => {
@@ -59,9 +76,10 @@ function renderQueue(cases) {
     b.dataset.role = 'case-row';
     b.dataset.ref = c.ref;
     if (c.ref === selected) b.setAttribute('aria-current', 'true');
-    const wait = c.waitingSeconds === null ? '' : ` · waiting ${Math.floor(c.waitingSeconds / 60)}:${String(c.waitingSeconds % 60).padStart(2, '0')}`;
+    if (c.waitLevel) b.dataset.level = c.waitLevel;
+    const wait = c.waitingSeconds === null ? '' : ` · waiting ${clock(c.waitingSeconds)}${c.waitingFor === 'reply' ? ' for a reply' : ''}${SLOW[c.waitLevel] ?? ''}`;
     b.textContent = `${c.priority ? 'PRIORITY · ' : ''}${c.ref} · ${label(c)}${wait}`;
-    b.addEventListener('click', () => { selected = c.ref; shownLines = ''; refresh(); });
+    b.addEventListener('click', () => { if (selected !== c.ref) clearSuggestions(); selected = c.ref; shownLines = ''; refresh(); });
     return b;
   }));
   $('queue-empty').hidden = cases.length > 0;
@@ -87,9 +105,60 @@ function renderContext(d) {
   }));
 }
 
+// Suggested replies (drafts only). They belong to the case they were asked for and are cleared when the agent moves to another.
+let suggesting = false;
+function clearSuggestions() {
+  $('suggestions').replaceChildren();
+  $('suggestions-message').textContent = '';
+}
+async function suggestReplies() {
+  const ref = selected;
+  if (!ref || suggesting) return;
+  suggesting = true;
+  $('suggest').disabled = true;
+  clearSuggestions();
+  $('suggestions-message').textContent = 'Writing drafts…';
+  let res;
+  try { res = await api('POST', `/agent/cases/${encodeURIComponent(ref)}/suggestions`, { count: Number($('suggest-count').value) }); }
+  catch { res = { ok: false, body: {} }; }
+  suggesting = false;
+  if (!pageOpen() || ref !== selected) return; // the agent moved on or closed the page while the model was writing
+  const drafts = res.ok ? res.body.suggestions : [];
+  $('suggestions-message').textContent = drafts.length ? '' : (res.body.message ?? 'No suggestions available'); // a failure is just "none", never an error
+  $('suggestions').replaceChildren(...drafts.map((text) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.role = 'suggestion';
+    b.textContent = text;
+    // A draft only fills the reply box; sending stays the agent's own click on Send.
+    b.addEventListener('click', () => { $('reply-input').value = text; $('reply-input').focus(); });
+    return b;
+  }));
+}
+
+// Internal notes: the service sends them only to an agent who may open the case.
+let shownNotes = '';
+function renderNotes(notes) {
+  $('note-add').disabled = !notes;
+  $('note-input').disabled = !notes;
+  const key = JSON.stringify(notes ?? []);
+  if (key === shownNotes) return;
+  shownNotes = key;
+  $('notes').replaceChildren(...(notes ?? []).map((n) => {
+    const item = document.createElement('div');
+    item.dataset.role = 'note';
+    const who = document.createElement('span');
+    who.className = 'who';
+    who.textContent = `${n.agent} · ${new Date(n.at).toLocaleString()}`;
+    item.append(who, document.createTextNode(n.text));
+    return item;
+  }));
+}
+
 function renderDetail(d) {
   $('detail').hidden = false;
   renderContext(d);
+  renderNotes(d.notes);
   $('detail-ref').textContent = `Case ${d.ref}`;
   $('detail-state').textContent = label(d);
   $('detail-claimed-by').textContent = d.claimedBy ?? 'nobody';
@@ -106,6 +175,9 @@ function renderDetail(d) {
   $('transfer').disabled = !mine || !$('transfer-to').value;
   $('reply-input').disabled = !mine;
   $('reply-send').disabled = !mine;
+  $('suggest').disabled = !mine || suggesting;
+  $('suggest-count').disabled = !mine;
+  if (!mine) clearSuggestions();
   const key = JSON.stringify(d.transcript.map((m) => m.seq));
   if (key === shownLines) return;
   shownLines = key;
@@ -126,12 +198,14 @@ function renderDetail(d) {
 
 async function refresh() {
   clearTimeout(timer);
-  if (!token) return;
+  if (!token || !document?.body?.isConnected) return;
   try {
     const list = await api('GET', '/agent/cases');
-    if (list.ok) renderQueue(list.body.cases);
+    if (!document?.body?.isConnected) return;
+    if (list.ok) { renderQueue(list.body.cases); renderThresholds(list.body.thresholds); }
     if (selected && list.ok) {
       const detail = await api('GET', `/agent/cases/${encodeURIComponent(selected)}`);
+      if (!document?.body?.isConnected) return;
       if (detail.ok) renderDetail(detail.body);
       else if (detail.status === 403) {
         // Another agent has it: show who, and nothing of the case itself.
@@ -141,7 +215,7 @@ async function refresh() {
       }
     }
   } catch { /* the next refresh tries again */ }
-  if (!token || !document?.body) return; // the page was closed while a request was in flight
+  if (!token || !document?.body || !document.body.isConnected) return; // the page was closed while a request was in flight
   const wait = Number(document.body.dataset.pollMs ?? 3000);
   timer = setTimeout(refresh, Number.isFinite(wait) ? wait : 3000);
 }
@@ -150,6 +224,7 @@ $('login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('login-error').textContent = '';
   const res = await api('POST', '/agent/login', { id: $('agent-id').value.trim(), password: $('agent-password').value });
+  if (!pageOpen()) return;
   $('agent-password').value = '';
   if (!res.ok) { $('login-error').textContent = 'Wrong agent id or password.'; return; }
   token = res.body.token;
@@ -243,6 +318,7 @@ $('dashboard-form').addEventListener('submit', (e) => { e.preventDefault(); load
 $('claim').addEventListener('click', async () => {
   $('claim-error').textContent = '';
   const res = await api('POST', `/agent/cases/${encodeURIComponent(selected)}/claim`);
+  if (!pageOpen()) return;
   if (!res.ok) $('claim-error').textContent = res.status === 409 ? 'Already claimed by another agent (or no longer open).' : 'Could not claim this case.';
   refresh();
 });
@@ -255,7 +331,22 @@ $('resolve').addEventListener('click', async () => {
 $('transfer').addEventListener('click', async () => {
   $('claim-error').textContent = '';
   const res = await api('POST', `/agent/cases/${encodeURIComponent(selected)}/transfer`, { to: $('transfer-to').value });
+  if (!pageOpen()) return;
   if (!res.ok) $('claim-error').textContent = 'Could not transfer this case.';
+  refresh();
+});
+
+$('suggest').addEventListener('click', suggestReplies);
+
+$('note-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const text = $('note-input').value.trim();
+  if (!text || !selected) return;
+  $('note-error').textContent = '';
+  const res = await api('POST', `/agent/cases/${encodeURIComponent(selected)}/notes`, { text });
+  if (!pageOpen()) return;
+  if (!res.ok) { $('note-error').textContent = 'Could not add the note.'; return; }
+  $('note-input').value = '';
   refresh();
 });
 

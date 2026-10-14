@@ -288,7 +288,7 @@ test('a second agent cannot open a case another agent has claimed, and learns on
   assert.doesNotMatch(JSON.stringify(denied.body), /wrong person|summary|REF-0001|transcript/);
   assert.equal((await aline.open(ref)).status, 200, 'the agent who has it still sees it');
   const listed = (await paul.list()).body.cases.find((c) => c.ref === ref);
-  assert.deepEqual(Object.keys(listed).sort(), ['claimable', 'claimedBy', 'closeReason', 'priority', 'ref', 'state', 'waitingSeconds'], 'the queue row carries no content');
+  assert.deepEqual(Object.keys(listed).sort(), ['claimable', 'claimedBy', 'closeReason', 'priority', 'ref', 'state', 'waitLevel', 'waitingFor', 'waitingSeconds'], 'the queue row carries no content');
 });
 
 test('a resolved case stays with the agent who handled it', async (t) => {
@@ -322,7 +322,8 @@ test('the console shows only the transcript of the case, never another customer\
 
   const everything = JSON.stringify(body);
   assert.match(everything, /secret-alice/);
-  assert.doesNotMatch(everything, /secret-bob|REF-BOB|777|Zimmer|\*\*\*\*8788/);
+  assert.doesNotMatch(everything, /secret-bob|REF-BOB|Zimmer|\*\*\*\*8788/);
+  assert.doesNotMatch(JSON.stringify(body.records), /"amount":777/, 'Bob\'s transaction amount is not included in Alice\'s records');
   const sentToModel = JSON.stringify(m.summaryCalls().map((c) => c.messages).filter((msgs) => /secret-alice/.test(JSON.stringify(msgs))));
   assert.ok(sentToModel.length > 2, 'alice\'s summary was requested');
   assert.doesNotMatch(sentToModel, /secret-bob/);

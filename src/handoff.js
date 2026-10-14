@@ -8,6 +8,9 @@ import { tokenOf } from './identity.js';
 import { cuesIn } from './chip.js';
 import { computeDashboard } from './dashboard.js';
 import { SUMMARY_LABEL, createSummarizer } from './summary.js';
+import { MAX_SUGGESTIONS, NO_SUGGESTIONS, createSuggester } from './suggestions.js';
+import { scrub } from './audit.js';
+import { shield } from './shield.js';
 
 // Fixed customer-facing text. The customer is told when to expect an update, never that it will be resolved.
 export const NOTICE = {
@@ -54,8 +57,9 @@ const CUSTOMER_MAIL = {
 };
 
 // Customer and agent routes for handoff cases. Returns true when it served the request.
-export function createHandoff({ identity, database, clock, audit, failedQuestions, mailer, agents, support, consoleUrl, conversations, model, recordsFor, retentionMs }) {
+export function createHandoff({ identity, database, clock, audit, failedQuestions, mailer, agents, support, consoleUrl, conversations, model, suggestions, recordsFor, retentionMs }) {
   const summarize = createSummarizer({ model });
+  const suggest = createSuggester(suggestions ?? {});
   const store = createCaseStore({ clock, database, agentById: (id) => agents?.list?.find((a) => a.id === id) });
   const { timers } = support;
   const hours = createHours(support.hours);
@@ -467,19 +471,46 @@ export function createHandoff({ identity, database, clock, audit, failedQuestion
   const isOpenToPool = (c) => c.state === 'with_agent' && c.openToPool === true;
   const mayOpen = (c, agent) => !c.agent || c.agent.id === agent.id || isOpenToPool(c);
 
-  const row = (c, agent) => ({
-    ref: c.ref, state: c.state, priority: Boolean(c.priority), claimedBy: c.agent?.name ?? null, closeReason: c.closeReason,
-    waitingSeconds: c.state === 'waiting' ? Math.floor((clock.now() - c.openedAt) / 1000) : null,
-    // Can this agent claim it now: unclaimed, or re-broadcast after 30 minutes of the holder's silence (not the holder).
-    claimable: c.state === 'waiting' || (isOpenToPool(c) && c.agent.id !== agent?.id),
-  });
+  // How long the customer has been waiting on this case, and for what: an unclaimed case waits for an agent from the moment it
+  // opened; a held case waits for a reply from the moment its silence clock started (the claim, the customer's message that
+  // the agent had not answered, a reopen or a transfer). Once the agent answers, or the case is closed, nobody is waiting.
+  const waitOf = (c) => {
+    if (c.state === 'waiting') return { since: c.openedAt, for: 'claim' };
+    if (c.state === 'with_agent' && c.awaitingAgent) return { since: c.silenceStartedAt, for: 'reply' };
+    return null;
+  };
+  // The levels come from the same timers the lifecycle runs on: the whole pool is paged at broadcastMs and the customer is told
+  // "queued" at queuedNoticeMs; the customer gets "still working on it" at agentSilenceMs and the case is re-broadcast at agentFollowUpMs.
+  const thresholds = {
+    waiting: { warnSeconds: timers.broadcastMs / 1000, urgentSeconds: timers.queuedNoticeMs / 1000 },
+    withAgent: { warnSeconds: timers.agentSilenceMs / 1000, urgentSeconds: timers.agentFollowUpMs / 1000 },
+  };
+  const levelOf = (waiting, ms) => {
+    const t = waiting.for === 'claim' ? thresholds.waiting : thresholds.withAgent;
+    return ms >= t.urgentSeconds * 1000 ? 'urgent' : ms >= t.warnSeconds * 1000 ? 'warning' : 'normal';
+  };
+
+  const row = (c, agent) => {
+    const waiting = waitOf(c);
+    const ms = waiting ? Math.max(0, clock.now() - waiting.since) : null;
+    return {
+      ref: c.ref, state: c.state, priority: Boolean(c.priority), claimedBy: c.agent?.name ?? null, closeReason: c.closeReason,
+      waitingSeconds: ms === null ? null : Math.floor(ms / 1000),
+      waitingFor: waiting?.for ?? null,
+      waitLevel: waiting ? levelOf(waiting, ms) : null,
+      // Can this agent claim it now: unclaimed, or re-broadcast after 30 minutes of the holder's silence (not the holder).
+      claimable: c.state === 'waiting' || (isOpenToPool(c) && c.agent.id !== agent?.id),
+    };
+  };
 
   function agentCases(req, res) {
     const agent = agentOf(req, res);
     if (!agent) return;
-    // Priority cases first, then newest first.
-    const ordered = store.all().reverse().sort((x, y) => Number(Boolean(y.priority)) - Number(Boolean(x.priority)));
-    json(res, 200, { cases: ordered.map((c) => row(c, agent)) });
+    // Open priority cases first, then the longest waiting; what nobody is waiting on (answered, resolved) follows, newest first.
+    const open = (r) => r.state === 'waiting' || r.state === 'with_agent';
+    const rows = store.all().reverse().map((c) => row(c, agent));
+    rows.sort((x, y) => Number(y.priority && open(y)) - Number(x.priority && open(x)) || (y.waitingSeconds ?? -1) - (x.waitingSeconds ?? -1));
+    json(res, 200, { cases: rows, thresholds });
   }
 
   const MAX_TEXT = 1000;
@@ -498,6 +529,7 @@ export function createHandoff({ identity, database, clock, audit, failedQuestion
       summary: c.summary ? { text: c.summary.text, label: SUMMARY_LABEL[c.language], regenerated: c.summary.regenerated } : null,
       summaryUnavailable: !c.summary,
       records: c.records ?? null,
+      notes: (c.notes ?? []).map(({ id, agent: by, agentId, text, at }) => ({ id, agent: by, agentId, text, at })),
       transcript: c.transcript.map(({ seq, from, text, at }) => ({ seq, from, text, at })) });
   }
 
@@ -523,6 +555,36 @@ export function createHandoff({ identity, database, clock, audit, failedQuestion
     touch(c);
     await mailCustomerIfGone(c);
     json(res, 200, { ok: true });
+  }
+
+  // Suggested replies (ticket 42): 1 to 3 drafts for the holder to edit. Nothing is added to the case or sent; the model call goes
+  // through the metered path (it counts against the request and token budgets) and any failure is a quiet empty answer.
+  async function suggestReplies(req, res, agent, ref) {
+    let body;
+    try { body = await readJson(req); } catch { json(res, 400, { error: 'bad_request' }); return; }
+    const c = ownCase(res, agent, ref);
+    if (!c) return;
+    const count = body?.count === undefined ? MAX_SUGGESTIONS : body.count;
+    if (!Number.isInteger(count) || count < 1 || count > MAX_SUGGESTIONS) { json(res, 400, { error: 'bad_count' }); return; }
+    const { suggestions: drafts, reason } = await suggest(c.transcript, c.language, count);
+    await record(c, 'suggestions_requested', { agent: agent.id, requested: count, shown: drafts.length, ...(reason ? { reason } : {}) });
+    json(res, 200, drafts.length ? { suggestions: drafts } : { suggestions: [], message: NO_SUGGESTIONS });
+  }
+
+  // Internal notes (ticket 42). Any agent who may open the case can read and add them; they are not part of the transcript, so the
+  // customer's view, the emails and the summary never see them. Stored masked and written to the audit log.
+  async function addNote(req, res, agent, ref) {
+    let body;
+    try { body = await readJson(req); } catch { json(res, 400, { error: 'bad_request' }); return; }
+    const c = store.get(ref);
+    if (!c) { json(res, 404, { error: 'not_found' }); return; }
+    if (!mayOpen(c, agent)) { json(res, 403, { error: 'not_your_case', claimedBy: c.agent.name }); return; }
+    const raw = typeof body?.text === 'string' ? body.text.trim() : '';
+    if (!raw || raw.length > MAX_TEXT) { json(res, 400, { error: 'bad_text' }); return; }
+    const text = scrub(maskText(shield(raw).text));
+    const note = store.addNote(c, agent, text);
+    await record(c, 'case_note_added', { agent: agent.id, noteId: note.id, noteText: note.text });
+    json(res, 200, { note });
   }
 
   async function resolveCase(res, agent, ref) {
@@ -639,7 +701,7 @@ export function createHandoff({ identity, database, clock, audit, failedQuestion
     if (url.pathname === '/agent/audit/export') { await auditExport(req, res, url); return true; }
     if (url.pathname === '/agent/audit') { await auditView(req, res, url); return true; }
     if (req.method === 'GET' && url.pathname === '/agent/cases') { agentCases(req, res); return true; }
-    const target = /^\/agent\/cases\/([A-Za-z0-9-]{1,20})(?:\/(claim|messages|resolve|transfer))?$/.exec(url.pathname);
+    const target = /^\/agent\/cases\/([A-Za-z0-9-]{1,20})(?:\/(claim|messages|resolve|transfer|suggestions|notes))?$/.exec(url.pathname);
     if (target) {
       const agent = agentOf(req, res);
       if (!agent) return true;
@@ -647,6 +709,8 @@ export function createHandoff({ identity, database, clock, audit, failedQuestion
       else if (req.method === 'POST' && target[2] === 'messages') await agentMessage(req, res, agent, target[1]);
       else if (req.method === 'POST' && target[2] === 'resolve') await resolveCase(res, agent, target[1]);
       else if (req.method === 'POST' && target[2] === 'transfer') await transferCase(req, res, agent, target[1]);
+      else if (req.method === 'POST' && target[2] === 'suggestions') await suggestReplies(req, res, agent, target[1]);
+      else if (req.method === 'POST' && target[2] === 'notes') await addNote(req, res, agent, target[1]);
       else if (req.method === 'GET' && !target[2]) await caseDetail(res, target[1], agent);
       else json(res, 404, { error: 'not_found' });
       return true;

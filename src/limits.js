@@ -37,8 +37,20 @@ export function createLimiter({ clock, limits = {} }) {
   const prune = (list, now, window) => { while (list.length && list[0].at <= now - window) list.shift(); };
   const tokensSince = (from) => tokens.reduce((sum, t) => (t.at > from ? sum + t.n : sum), 0);
 
+  // The global budgets, which every model call shares: the daily request count and the tokens of the last minute and day.
+  const globalHit = (now) => {
+    if (requests.day === dayOf(now) && requests.count >= cfg.requestsPerDay) return 'requests_per_day';
+    prune(tokens, now, DAY);
+    if (tokensSince(now - MINUTE) >= cfg.tokensPerMinute) return 'token_budget';
+    if (tokensSince(now - DAY) >= cfg.tokensPerDay) return 'daily_token_budget';
+    return null;
+  };
+
   return {
     cfg,
+    // The global budget that is used up right now, or null. Nothing is counted: for calls that are not a customer message
+    // (an agent's suggested replies) and must not run once the model's budget is gone.
+    budgetHit: () => globalHit(clock.now()),
     // Tokens used in the last 24 hours, all customers.
     dailyTokens() { const now = clock.now(); prune(tokens, now, DAY); return tokensSince(now - DAY); },
     // Decides whether a message may start a turn. Returns the limit that was hit,
@@ -51,10 +63,8 @@ export function createLimiter({ clock, limits = {} }) {
       const today = dayOf(now);
       const day = daily.get(user)?.day === today ? daily.get(user) : { day: today, count: 0 };
       if (day.count >= cfg.messagesPerDay) return 'messages_per_day';
-      if (requests.day === today && requests.count >= cfg.requestsPerDay) return 'requests_per_day';
-      prune(tokens, now, DAY);
-      if (tokensSince(now - MINUTE) >= cfg.tokensPerMinute) return 'token_budget';
-      if (tokensSince(now - DAY) >= cfg.tokensPerDay) return 'daily_token_budget';
+      const global = globalHit(now);
+      if (global) return global;
       messages.set(user, [...recent, now]);
       daily.set(user, { day: today, count: day.count + 1 });
       return null;

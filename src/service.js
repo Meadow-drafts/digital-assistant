@@ -116,6 +116,8 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
   const handoff = createHandoff({
     identity, database, clock, audit, failedQuestions, mailer, agents, support, consoleUrl, conversations, retentionMs: retention?.ms,
     model: model && limiter.track(model), // agent summaries spend the same global token budget
+    // Suggested replies take the metered path: counted as requests and tokens, and not run once a global budget is used up.
+    suggestions: { model, meter: (m) => limiter.meter(m), budgetHit: () => limiter.budgetHit(), checkOutput },
     recordsFor: async ({ conversation, req, tenant }) => (t1 && req ? t1.recentMasked(conversation, tokenOf(req), await entitlementsFor(req, tenant, conversation)) : null),
   });
 

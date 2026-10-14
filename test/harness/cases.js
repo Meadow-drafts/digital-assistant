@@ -48,5 +48,7 @@ export async function agentLogin(baseUrl, id = 'aline') {
     reply: (ref, text) => call(baseUrl, 'POST', `/agent/cases/${ref}/messages`, { token, body: { text } }),
     resolve: (ref) => call(baseUrl, 'POST', `/agent/cases/${ref}/resolve`, { token }),
     transfer: (ref, to) => call(baseUrl, 'POST', `/agent/cases/${ref}/transfer`, { token, body: { to } }),
+    suggest: (ref, count) => call(baseUrl, 'POST', `/agent/cases/${ref}/suggestions`, { token, body: count === undefined ? {} : { count } }),
+    note: (ref, text) => call(baseUrl, 'POST', `/agent/cases/${ref}/notes`, { token, body: { text } }),
   };
 }

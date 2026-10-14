@@ -31,5 +31,6 @@ export async function startService(overrides = {}) {
   const server = createService(deps);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
-  return { ...deps, server, baseUrl, close: () => new Promise((r) => { server.closeAllConnections?.(); server.close(r); }) };
+  // Let in-flight console polls finish after jsdom closes; destroying their sockets makes fetch reject asynchronously in the test.
+  return { ...deps, server, baseUrl, close: () => new Promise((r) => server.close(r)) };
 }

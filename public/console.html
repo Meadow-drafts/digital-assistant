@@ -6,11 +6,14 @@
   <title>Support console</title>
   <style>
     body { font: 14px/1.45 system-ui, sans-serif; margin: 0; background: #f5f4f0; color: #1d1d1b; }
-    main { max-width: 1000px; margin: 0 auto; padding: 1rem; }
+    main { max-width: 1200px; margin: 0 auto; padding: 1rem; }
     h1 { font-size: 1.1rem; margin: 0 0 .75rem; }
     h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: #6b6b66; margin: 0 0 .5rem; }
     .card { background: #fff; border: 1px solid #dcdad2; border-radius: 8px; padding: .75rem 1rem; }
     .grid { display: grid; grid-template-columns: 280px 1fr; gap: 1rem; align-items: start; }
+    .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 1rem; align-items: start; margin-top: .5rem; }
+    .workspace .block { margin-top: 0; }
+    @media (max-width: 900px) { .workspace { grid-template-columns: 1fr; } }
     @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
     [hidden] { display: none !important; }
     label { display: block; margin: .4rem 0; }
@@ -21,6 +24,11 @@
     [data-role="queue"] { display: grid; gap: .4rem; }
     [data-role="case-row"] { text-align: left; border-radius: 6px; }
     [data-role="case-row"][aria-current="true"] { border-color: #0f6b5c; background: #ecfdf5; }
+    [data-role="case-row"][data-level="warning"] { border-left: 4px solid #d97706; }
+    [data-role="case-row"][data-level="urgent"] { border-left: 4px solid #b91c1c; background: #fef2f2; }
+    [data-role="suggestions"] { display: grid; gap: .3rem; margin: .25rem 0; }
+    [data-role="suggestion"] { text-align: left; background: #f0f7ff; border-color: #bfdbfe; }
+    [data-role="note"] { padding: .25rem 0; border-top: 1px solid #ecebe4; white-space: pre-wrap; overflow-wrap: anywhere; }
     [data-role="transcript"] { display: grid; gap: .3rem; max-height: 22rem; overflow-y: auto; margin: .5rem 0; }
     [data-role="line"] { padding: .3rem .6rem; border-radius: 6px; background: #ecebe4; max-width: 85%; white-space: pre-wrap; }
     [data-role="line"][data-from="customer"] { justify-self: start; background: #fff; border: 1px solid #dcdad2; }
@@ -96,25 +104,48 @@
         <h2>Cases</h2>
         <div data-role="queue"></div>
         <p class="note" data-role="queue-empty">No cases yet.</p>
+        <p class="note" data-role="queue-thresholds"></p>
       </section>
       <section class="card" data-role="detail" hidden>
         <h2 data-role="detail-ref"></h2>
         <p>State: <b data-role="detail-state"></b> · Claimed by: <span data-role="detail-claimed-by"></span> <span class="flag" data-role="priority" hidden>PRIORITY: wrong transfer</span></p>
         <div data-role="draft" class="block" hidden><h3>Customer's draft</h3><div data-role="draft-text"></div></div>
         <div data-role="summary" class="block" hidden><h3 data-role="summary-label"></h3><div data-role="summary-text"></div></div>
-        <div data-role="records-box" class="block" hidden><h3>Recent transactions (masked)</h3><div data-role="records"></div></div>
-        <details data-role="transcript-box"><summary>Raw transcript</summary><div data-role="transcript"></div></details>
+        <p class="error" data-role="claim-error" role="alert"></p>
         <div class="row">
           <button class="primary" data-role="claim" type="button">Claim this case</button>
           <button data-role="resolve" type="button">Mark resolved</button>
           <select data-role="transfer-to" aria-label="Colleague to transfer to"></select>
           <button data-role="transfer" type="button">Transfer</button>
         </div>
-        <p class="error" data-role="claim-error" role="alert"></p>
-        <form data-role="reply-form" class="row">
-          <input data-role="reply-input" type="text" maxlength="1000" autocomplete="off" placeholder="Reply to the customer…" />
-          <button data-role="reply-send" type="submit">Send</button>
-        </form>
+        <div class="workspace" data-role="workspace">
+          <div data-role="chat">
+            <details data-role="transcript-box"><summary>Raw transcript</summary><div data-role="transcript"></div></details>
+            <div class="row">
+              <select data-role="suggest-count" aria-label="Number of draft replies"><option value="1">1 draft</option><option value="2">2 drafts</option><option value="3" selected>3 drafts</option></select>
+              <button data-role="suggest" type="button">Suggest replies</button>
+              <span class="note">Drafts only: pick one, edit it, then send.</span>
+            </div>
+            <p class="note" data-role="suggestions-message" role="status"></p>
+            <div data-role="suggestions"></div>
+            <form data-role="reply-form" class="row">
+              <input data-role="reply-input" type="text" maxlength="1000" autocomplete="off" placeholder="Reply to the customer…" />
+              <button data-role="reply-send" type="submit">Send</button>
+            </form>
+          </div>
+          <aside data-role="side">
+            <div data-role="records-box" class="block" hidden><h3>Recent transactions (masked)</h3><div data-role="records"></div></div>
+            <div data-role="notes-box" class="block">
+              <h3>Internal notes (never shown to the customer)</h3>
+              <div data-role="notes"></div>
+              <form data-role="note-form" class="row">
+                <input data-role="note-input" type="text" maxlength="1000" autocomplete="off" placeholder="Add an internal note…" />
+                <button data-role="note-add" type="submit">Add</button>
+              </form>
+              <p class="error" data-role="note-error" role="alert"></p>
+            </div>
+          </aside>
+        </div>
       </section>
     </div>
   </div>
