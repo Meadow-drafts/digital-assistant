@@ -42,6 +42,76 @@ test('the console asks for an agent login first and shows no case until the agen
   assert.match(row(w, ref).textContent, /waiting/i);
 });
 
+test('login reports connection failures without presenting them as bad credentials', async (t) => {
+  const svc = await startService({ model: createFakeModel(['ok']) });
+  t.after(svc.close);
+  const w = await openConsole(svc, t);
+  w.dom.window.fetch = async () => { throw new Error('offline'); };
+  w.q('agent-id').value = 'aline';
+  w.q('agent-password').value = 'not-sent';
+  w.q('login-form').dispatchEvent(new w.dom.window.Event('submit', { cancelable: true, bubbles: true }));
+
+  await w.until(() => w.q('login-error').textContent !== '');
+
+  assert.match(w.q('login-error').textContent, /connection/i);
+  assert.doesNotMatch(w.q('login-error').textContent, /wrong|password/i);
+});
+
+test('an expired agent session returns to login with a clear accessible message', async (t) => {
+  const svc = await startService({ model: createFakeModel(['ok']), agents: { ...AGENTS, sessionMs: 1000 } });
+  t.after(svc.close);
+  const w = await openConsole(svc, t);
+  w.document.body.dataset.pollMs = '20';
+  await signIn(w);
+
+  await svc.clock.advance(1001);
+
+  await w.until(() => !w.q('login-form').hidden && /session expired/i.test(w.q('login-error').textContent));
+  assert.equal(w.q('console').hidden, true);
+  assert.equal(w.q('agent-password').value, '');
+});
+
+test('the authenticated console opens queue first and returns from a focused case without losing its selection', async (t) => {
+  const svc = await startService({ model: createFakeModel(['ok']) });
+  t.after(svc.close);
+  const c = await customer(svc.baseUrl, 'queue-first-token', 'I need help with a transfer');
+  const { ref } = (await c.handoff()).body;
+  const w = await openConsole(svc, t);
+  await signIn(w);
+  await w.until(() => row(w, ref));
+
+  assert.equal(w.q('queue-screen').hidden, false);
+  assert.equal(w.q('detail').hidden, true, 'case content is not shown beside every queue row');
+  row(w, ref).click();
+  await w.until(() => w.q('detail-ref')?.textContent.includes(ref));
+  assert.equal(w.q('queue-screen').hidden, true);
+  assert.equal(w.q('case-screen').hidden, false);
+
+  w.q('back-to-queue').click();
+
+  assert.equal(w.q('queue-screen').hidden, false);
+  assert.equal(w.q('case-screen').hidden, true);
+  assert.equal(row(w, ref).getAttribute('aria-current'), 'true');
+});
+
+test('the queue filters cases by status and conversation language without changing server ordering', async (t) => {
+  const svc = await startService({ model: createFakeModel(['ok']) });
+  t.after(svc.close);
+  const english = await customer(svc.baseUrl, 'english-queue-token', 'I need help with a transfer');
+  const french = await customer(svc.baseUrl, 'french-queue-token', 'Bonjour, aidez-moi avec mon transfert');
+  const englishRef = (await english.handoff()).body.ref;
+  const frenchRef = (await french.handoff()).body.ref;
+  const w = await openConsole(svc, t);
+  await signIn(w);
+  await w.until(() => row(w, englishRef) && row(w, frenchRef));
+
+  w.q('queue-language').value = 'fr';
+  w.q('queue-language').dispatchEvent(new w.dom.window.Event('change'));
+
+  await w.until(() => row(w, frenchRef) && !row(w, englishRef));
+  assert.deepEqual(w.qa('case-row').map((item) => item.dataset.ref), [frenchRef]);
+});
+
 test('an agent claims, reads the masked transcript, chats with the customer and resolves', async (t) => {
   const svc = await startService({ model: createFakeModel(['Open Transfers.']) });
   t.after(svc.close);
