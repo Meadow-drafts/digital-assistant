@@ -205,6 +205,7 @@ class BankAssistant extends HTMLElement {
         .ba-root [data-role="send"] { background: var(--ba-brand-primary, #2458a8); border: 1px solid var(--ba-brand-primary, #2458a8); border-radius: .35rem; color: #fff; padding: .4rem .75rem; }
         .ba-root [data-role="human-chip"] { border-color: var(--ba-brand-secondary, #607080); }
         .ba-root [data-role="human-chip"][data-prominent="true"] { background: var(--ba-brand-primary, #2458a8); border-color: var(--ba-brand-primary, #2458a8); color: #fff; }
+        .ba-root [data-role="clarification-options"] { display: flex; flex-wrap: wrap; gap: .4rem; margin: .4rem 0; }
       </style>
       <section class="ba-root" data-role="root" aria-label="Assistant">
         <header data-role="title"></header>
@@ -758,6 +759,26 @@ class BankAssistant extends HTMLElement {
     this.q('messages').appendChild(el);
   }
 
+  addClarification(event) {
+    const question = this.addMessage('assistant', event.question);
+    question.dataset.role = 'clarification-question';
+    const choices = document.createElement('div');
+    choices.dataset.role = 'clarification-options';
+    for (const option of event.options ?? []) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.role = 'clarification-option';
+      button.textContent = option;
+      button.addEventListener('click', () => {
+        for (const choice of choices.querySelectorAll('button')) choice.disabled = true;
+        this.q('input').value = option;
+        this.submit();
+      });
+      choices.appendChild(button);
+    }
+    this.q('messages').appendChild(choices);
+  }
+
   // Fixed next-step card from the service (human chip or a form shortcut); the text is never model-written.
   addCard(card) {
     const el = document.createElement('div');
@@ -1043,6 +1064,8 @@ class BankAssistant extends HTMLElement {
           if (ev.code === 'pin_required') pinNeeded = true;
         } else if (ev.type === 'guides') {
           guides = ev.guides;
+        } else if (ev.type === 'clarification') {
+          this.addClarification(ev);
         } else if (ev.type === 'done') {
           finished = true;
           this.conversationId = ev.conversationId;

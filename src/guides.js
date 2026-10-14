@@ -107,3 +107,16 @@ export function loadGuides(dirArg) {
   const unsupportedFile = path.join(dir, 'UNSUPPORTED.md');
   return new GuideSet(guides, existsSync(unsupportedFile) ? readFileSync(unsupportedFile, 'utf8') : '');
 }
+
+// Return one exact numbered step shared by every candidate guide. If there is
+// no identical step, the service can safely fall back without model synthesis.
+export function commonVerifiedStep(candidates, language) {
+  if (candidates.length < 2) return null;
+  const steps = candidates.map((guide) => {
+    const heading = language === 'fr' ? 'Étapes' : 'Steps';
+    const section = new RegExp(`^## ${heading}\\s*\\n([\\s\\S]*?)(?=\\n## |$)`, 'm').exec(guide[language].text)?.[1] ?? '';
+    return [...section.matchAll(/^\d+\.\s+(.+)$/gm)].map((match) => match[1].trim());
+  });
+  const shared = steps[0].find((step) => steps.slice(1).every((list) => list.includes(step)));
+  return shared ?? null;
+}
