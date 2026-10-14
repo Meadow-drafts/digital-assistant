@@ -154,6 +154,7 @@ test('the queue shows the waiting time of every case, highest priority and longe
   const w = await consolePage(svc, t, 'aline');
   await w.until(() => rowOf(w, first));
   assert.match(rowOf(w, first).textContent, /waiting 2:00/);
+  assert.equal(rowOf(w, first).querySelector('.case-age').textContent, '2 min ago');
   assert.equal(rowOf(w, first).dataset.level, 'normal');
 
   await svc.clock.advance(3 * MIN); // exactly the 5 minute broadcast timer

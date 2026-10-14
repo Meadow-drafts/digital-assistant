@@ -130,8 +130,8 @@ function renderQueue(cases) {
       const priority = document.createElement('span'); priority.className = 'pill priority'; priority.textContent = 'Priority'; head.append(priority);
     }
     const age = document.createElement('time'); age.className = 'case-age';
-    const ageSeconds = Math.max(0, Math.floor((Date.now() - Date.parse(c.openedAt)) / 1000));
-    age.textContent = Number.isFinite(ageSeconds) ? ageSeconds < 3600 ? `${Math.floor(ageSeconds / 60)} min ago` : ageSeconds < 86400 ? `${Math.floor(ageSeconds / 3600)} h ago` : `${Math.floor(ageSeconds / 86400)} d ago` : '';
+    const ageSeconds = Number.isFinite(c.ageSeconds) ? c.ageSeconds : null;
+    age.textContent = ageSeconds === null ? '' : ageSeconds < 3600 ? `${Math.floor(ageSeconds / 60)} min ago` : ageSeconds < 86400 ? `${Math.floor(ageSeconds / 3600)} h ago` : `${Math.floor(ageSeconds / 86400)} d ago`;
     head.append(age);
     const state = document.createElement('span'); state.className = `pill ${c.state === 'waiting' ? 'waiting' : c.state === 'with_agent' ? 'assigned' : ''}`; state.textContent = label(c);
     const summary = document.createElement('span'); summary.className = 'case-summary';

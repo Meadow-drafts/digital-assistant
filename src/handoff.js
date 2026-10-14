@@ -484,6 +484,7 @@ export function createHandoff({ identity, database, clock, audit, failedQuestion
     const ms = waiting ? Math.max(0, clock.now() - waiting.since) : null;
     return {
       ref: c.ref, state: c.state, language: c.language, priority: Boolean(c.priority), claimedBy: c.agent?.name ?? null, closeReason: c.closeReason,
+      ageSeconds: Math.max(0, Math.floor((clock.now() - c.openedAt) / 1000)),
       ...(mayOpen(c, agent) && (c.summary?.text || c.draft) ? { queueSummary: c.summary?.text ?? c.draft, queueSummarySource: c.summary?.text ? 'assistant' : 'customer' } : {}),
       waitingSeconds: ms === null ? null : Math.floor(ms / 1000),
       waitingFor: waiting?.for ?? null,
