@@ -8,7 +8,7 @@ import { parseRefusal, refusalCard } from './refusals.js';
 import { BLOCKED, createOutputFilter } from './filter.js';
 import { chipState, cuesIn, parseEscalate, questionKey } from './chip.js';
 import { PROTECTED_TEXTS, modelHistory, UNSUPPORTED_ID, answerMessages, dataMessages, explainMessages, routerMessages } from './prompts.js';
-import { asksForUnavailable, asksToComplete, intentTool, isNavigationAsk } from './intents.js';
+import { asksForUnavailable, asksToComplete, intentTool, isNavigationAsk, transferGuideIntent } from './intents.js';
 import { offeredPages, parseNavigate, routeIdForPath, stepsOf, validateProposal } from './navigate.js';
 import { GUIDE_ID, NEXT_STEP, OUTCOMES, TEXT as EXPLAIN_TEXT, parseNext } from './explain.js';
 import { MESSAGES as T1_MESSAGES, TOOL_RULES, UNLOCK_MS, createT1, parseToolCall } from './t1.js';
@@ -529,6 +529,14 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
         let routed = selected
           ? { picks: [selected.id], refusal: null }
           : await routeGuides({ model: turnModel, language, available, guides, history, tools: t1 ? TOOL_RULES : '', page });
+        // Common account-transfer and vague help phrasing was model-routed inconsistently.
+        // Resolve it after the model has had a chance to refuse unsafe asks.
+        if (!selected && routed.refusal === 'execute' && !asksToComplete(message)) {
+          routed = await routeGuides({ model: turnModel, language, available, guides, history, tools: t1 ? TOOL_RULES : '', retry: true, page });
+        }
+        if (!selected && !routed.tool && (!routed.refusal || routed.refusal === 'execute' && !asksToComplete(message))) {
+          routed = transferGuideIntent(message, available) ?? routed;
+        }
         let askClarification = false;
         if (routed.ambiguous) {
           if (pendingClarification) {
@@ -542,11 +550,6 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
             conversation.pendingClarification = { guideIds: routed.clarification };
           }
         } else if (pendingClarification) conversation.pendingClarification = null;
-        // "I want to send money" is a how-to question, not a request to execute. If the router refused it as execute and
-        // the customer did not ask the assistant to complete or approve anything, ask once more with a reminder.
-        if (!askClarification && routed.refusal === 'execute' && !asksToComplete(message)) {
-          routed = await routeGuides({ model: turnModel, language, available, guides, history, tools: t1 ? TOOL_RULES : '', retry: true, page });
-        }
         const { picks } = routed;
         refusal = routed.refusal;
         if (askClarification) {

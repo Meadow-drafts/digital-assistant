@@ -8,6 +8,25 @@ const COMPLETE_IT = /\b(confirm\w*|approv\w*|validat\w*|execut\w*|go ahead|do it
 // True when the customer asks the assistant itself to complete, confirm or approve something.
 export const asksToComplete = (text) => typeof text === 'string' && COMPLETE_IT.test(norm(text));
 
+// A narrow how-to route for the two common wording patterns behind transfer
+// confusion. Choices are limited to the guides already filtered for the user.
+export function transferGuideIntent(text, available) {
+  if (typeof text !== 'string' || asksToComplete(text)) return null;
+  const t = norm(text);
+  const byId = new Map(available.map((guide) => [guide.id, guide]));
+  const accountQuestion = /\bhow do i (?:send|transfer) money to (?:another|an) account\b/.test(t)
+    || /\bcomment (?:envoyer|transferer) de l argent (?:a|vers) un autre compte\b/.test(t);
+  if (accountQuestion && byId.has('transfer-single')) return { picks: ['transfer-single'], refusal: null };
+
+  const vagueHelp = /\b(?:i need help|need help|help me|j ai besoin d aide|aide moi)\b.*\b(?:send(?:ing)?|transfer(?:ring)?|envoyer|transferer)\b.{0,20}\b(?:money|funds|argent)\b/.test(t);
+  const destinationSpecified = /\b(?:account|compte|wallet|abroad|international|country|remittance|beneficiar\w*|destinataire|etranger)\b/.test(t);
+  if (!vagueHelp || destinationSpecified) return null;
+  const choices = ['transfer-single', 'transfer-remittance'].filter((id) => byId.has(id));
+  if (choices.length > 1) return { picks: [], refusal: null, clarification: choices, ambiguous: true };
+  if (choices.length === 1) return { picks: choices, refusal: null };
+  return null;
+}
+
 const MAX_WORDS = 10;
 const OTHER_PERSON = /\b(colleague|collegue|friend|ami|amie|brother|frere|sister|soeur|wife|husband|mari|femme|mother|mere|father|pere|his|her|their|him|them|someone|quelqu un|marie|account number|numero de compte)\b|\w+ s (account|balance|solde)\b|\bde (ma|mon|mes|ta|ton|son|sa|ses|leur)\b|\d{5,}/;
 const FAILURE = /\b(fail|failed|declined|insufficient|error|refus\w*|why|echec|echoue\w*|insuffisant\w*|erreur|pourquoi|reject\w*|rejet\w*|deducted|debited|debite\w*)\b/;

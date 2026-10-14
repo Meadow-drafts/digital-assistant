@@ -130,11 +130,11 @@ test('an ambiguous account question does not run a T1 read selected by the norma
   assert.ok(svc.gateway.calls.every((call) => !/getSolde|history\/bipay-recent/i.test(call.path)));
 });
 
-test('an unavailable interpretation is never offered or silently answered', async (t) => {
+test('an unavailable interpretation is omitted and only the remaining eligible guide is used', async (t) => {
   const customer = alice();
   const model = createFakeModel((request) => request.purpose === 'route'
     ? '{"clarify":["transfer-single","transfer-remittance"]}'
-    : 'This must not be used.');
+    : 'Use the Single Transfer steps.');
   const svc = await start({ customers: [customer], model });
   t.after(svc.close);
   const conversationId = await begin(svc, customer, {
@@ -144,15 +144,15 @@ test('an unavailable interpretation is never offered or silently answered', asyn
   const { events } = await say(svc, customer, 'I need help sending money', conversationId);
 
   assert.equal(event(events, 'clarification'), undefined);
-  assert.deepEqual(event(events, 'guides').guides, []);
-  assert.match(events.filter((item) => item.type === 'delta').map((item) => item.text).join(''), /no verified steps/i);
-  assert.equal(model.calls.filter((call) => call.purpose === 'answer').length, 0);
+  assert.deepEqual(event(events, 'guides').guides.map((guide) => guide.id), ['transfer-single']);
+  assert.match(events.filter((item) => item.type === 'delta').map((item) => item.text).join(''), /Single Transfer/);
+  assert.doesNotMatch(JSON.stringify(events), /transfer-remittance/);
 });
 
 test('the clarification question and offered guide titles follow the customer’s language', async (t) => {
   const customer = alice();
   const model = createFakeModel((request) => request.purpose === 'route'
-    ? '{"clarify":["transfer-single","transfer-remittance"]}'
+    ? '["transfer-single"]'
     : 'Étapes.');
   const svc = await start({ customers: [customer], model });
   t.after(svc.close);
@@ -178,6 +178,41 @@ test('a clear request continues directly without an unnecessary clarification', 
   assert.equal(event(events, 'clarification'), undefined);
   assert.equal(event(events, 'guides').guides[0].id, 'transfer-single');
   assert.equal(model.calls.filter((call) => call.purpose === 'answer').length, 1);
+});
+
+test('an explicit account transfer is still routed when the first model route returns no guide', async (t) => {
+  const customer = alice();
+  let routes = 0;
+  const model = createFakeModel((request) => {
+    if (request.purpose === 'route') return ++routes === 1 ? '[]' : '["transfer-single"]';
+    return 'Open Transfers, then Single Transfer.';
+  });
+  const svc = await start({ customers: [customer], model });
+  t.after(svc.close);
+  const conversationId = await begin(svc, customer);
+
+  const { events } = await say(svc, customer, 'How do I send money to another account?', conversationId);
+
+  assert.equal(event(events, 'guides').guides[0]?.id, 'transfer-single');
+  assert.equal(event(events, 'clarification'), undefined);
+  assert.match(events.filter((item) => item.type === 'delta').map((item) => item.text).join(''), /Single Transfer/);
+});
+
+test('a vague send-money request clarifies when both transfer guides are eligible, even if the router picks one', async (t) => {
+  const customer = alice();
+  const model = createFakeModel((request) => request.purpose === 'route' ? '["transfer-single"]' : 'Single Transfer steps.');
+  const svc = await start({ customers: [customer], model });
+  t.after(svc.close);
+  const conversationId = await begin(svc, customer);
+
+  const { events } = await say(svc, customer, 'I need help sending money.', conversationId);
+
+  assert.deepEqual(event(events, 'clarification')?.options, [
+    'Send a single transfer',
+    'Send an outgoing remittance (money to someone who may not have an account)',
+  ]);
+  assert.equal(event(events, 'action_card'), undefined);
+  assert.equal(model.calls.filter((call) => call.purpose === 'answer').length, 0);
 });
 
 test('the widget presents plain-language choices and sends the selected choice back to the service', async (t) => {
