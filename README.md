@@ -63,6 +63,8 @@ TEST_TOKEN=... TEST_CLI=... npm start
 
 The portal change lives on the branch `feature/bank-assistant-widget` (two files, uncommitted at the time of writing): `src/components/ChatBot.jsx` (replaces the static stub with the `<bank-assistant>` tag and loads `widget.js`) and `src/App.js` (mounts it once inside the router, so the chat survives page changes). It passes the customer's token (`localStorage.token`), `cli`, `usePackages`, `pack` and `audience` (from `localStorage.user`; `typecli "0002"` is an individual, anything else a merchant) and handles `bank-assistant:navigate` with the portal's router, so a link does not reload the page. The widget only shows to a signed-in customer.
 
+The widget accepts optional `brand-name`, `brand-primary` and `brand-secondary` attributes. The portal supplies the active tenant's existing brand name and theme colors; standalone hosts can do the same in the widget tag. Colors accept `#RGB`, `#RGBA`, `#RRGGBB`, `#RRGGBBAA` or three space-separated RGB channels from 0 to 255. These values only style the widget and never change service behavior. During a dropped or stalled connection, unsent messages remain queued in order, the same message id is reused for retries, and the service replays that turn rather than processing it twice. Retries use increasing delays, resume on the browser's `online` event, and leave an explicit retry button after the automatic attempts are exhausted.
+
 ```sh
 # assistant (port 3000), with your model keys; no TEST_TOKEN needed, the portal supplies the login token
 ALLOWED_ORIGINS=http://localhost:3001 npm start

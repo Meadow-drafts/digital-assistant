@@ -48,6 +48,9 @@ function send(res, event, data) {
 const sessionExpired = (res) => res.writeHead(401, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'session_expired' }));
 
 const MAX_GUIDES = 3;
+const MESSAGE_ID = /^[A-Za-z0-9_-]{8,64}$/;
+const MAX_TURNS = 500;
+const TURN_TTL_MS = 15 * 60_000;
 const NO_VERIFIED_STEPS = {
   en: 'I have no verified steps for that in the portal guides, so I will not guess. Please use "Talk to a human agent" and they can help.',
   fr: "Je n'ai pas d'étapes vérifiées pour cela dans les guides du portail, donc je ne vais pas deviner. Utilisez « Parler à un agent » et il pourra vous aider.",
@@ -238,6 +241,40 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     reply(403, { error: 'flag_not_valid' });
   }
 
+  // Turns by owner and message id, so a retry after a dropped connection gets the same reply instead of a second run
+  // (one history entry, one audit record, one rate-limit charge). Kept in memory for a short while: the bytes sent are
+  // the same ones the customer already received.
+  const turns = new Map();
+  function recordTurn(key, res) {
+    const turn = { at: clock.now(), chunks: [], waiting: new Set(), ended: false };
+    turns.set(key, turn);
+    if (turns.size > MAX_TURNS) turns.delete(turns.keys().next().value);
+    const write = res.write.bind(res);
+    const end = res.end.bind(res);
+    res.write = (chunk, ...rest) => { turn.chunks.push(chunk); for (const r of turn.waiting) r.write(chunk); return write(chunk, ...rest); };
+    res.end = (...args) => {
+      turn.ended = true;
+      // Only a turn that reached its end is worth replaying; an error or a crash is asked again.
+      if (!turn.chunks.some((c) => typeof c === 'string' && c.startsWith('event: done\n'))) turns.delete(key);
+      for (const r of turn.waiting) r.end();
+      turn.waiting.clear();
+      return end(...args);
+    };
+  }
+  function replayTurn(key, res) {
+    const turn = turns.get(key);
+    if (!turn) return false;
+    if (clock.now() - turn.at > TURN_TTL_MS) { turns.delete(key); return false; }
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+    for (const chunk of turn.chunks) res.write(chunk);
+    if (turn.ended) res.end(); else {
+      const removeClosed = () => turn.waiting.delete(res);
+      res.once('close', removeClosed);
+      turn.waiting.add(res); // still running: follow it live
+    }
+    return true;
+  }
+
   async function handleChat(req, res) {
     let body;
     try { body = await readJson(req); } catch { res.writeHead(400).end(); return; }
@@ -260,8 +297,12 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
       res.writeHead(404).end();
       return;
     }
+    // A retry carries the id of the message it repeats (ticket 50). A turn already seen is replayed, never run again.
+    const turnKey = MESSAGE_ID.test(body.messageId ?? '') ? `${owner}\n${body.messageId}` : null;
+    if (turnKey && replayTurn(turnKey, res)) return;
     const conversationId = known ? body.conversationId : randomUUID();
     const conversation = known ?? { owner, history: [], language: 'en', asked: new Set(), session: null };
+    if (turnKey) recordTurn(turnKey, res);
     conversation.lastActiveAt = clock.now();
     const language = detectLanguage(body.message, conversation.language);
     // With a human agent the bot is muted: the message goes to the agent, nothing is sent to the model.
@@ -297,7 +338,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     conversations.set(conversationId, conversation);
 
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
-    send(res, 'thinking', {});
+    send(res, 'thinking', { conversationId });
     // While a case waits for an agent the bot still answers, and says so.
     const waitingCase = handoff.waitingCaseFor(conversationId);
     if (waitingCase) send(res, 'case', { state: 'waiting', ref: waitingCase.ref, automated: true });

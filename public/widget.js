@@ -1,6 +1,7 @@
 // <bank-assistant> chat widget. Mounted by one script tag; talks only to the
 // assistant service (never to a model). Attributes: api (service base URL,
-// default same origin), tenant, token (demo only; the portal sets
+// default same origin), tenant, brand-name, brand-primary and brand-secondary
+// (display-only tenant configuration), token (demo only; the portal sets
 // el.getToken = () => userToken instead). For account reads the host also
 // provides the customer's cli once (cli attribute or el.getCli) and, until the
 // backend can supply them, gating data (gating attribute or el.getGating).
@@ -31,6 +32,11 @@ const TEXT = {
     thinking: 'Thinking…',
     used: 'What I used',
     error: 'The assistant is unavailable right now. Please try again.',
+    reconnecting: 'Reconnecting…',
+    slow: 'Slow connection, still trying…',
+    incomplete: 'This reply was cut off.',
+    notSent: 'Your message has not been sent yet.',
+    retry: 'Try again',
     pinTitle: 'Enter your PIN to see your balance. It is not sent to the assistant or kept in the chat.',
     pinPlaceholder: 'PIN',
     pinSubmit: 'Unlock balance',
@@ -102,6 +108,11 @@ const TEXT = {
     thinking: 'Réflexion en cours…',
     used: "Ce que j'ai utilisé",
     error: "L'assistant est indisponible pour le moment. Veuillez réessayer.",
+    reconnecting: 'Reconnexion…',
+    slow: 'Connexion lente, nouvelle tentative…',
+    incomplete: 'Cette réponse a été interrompue.',
+    notSent: "Votre message n'a pas encore été envoyé.",
+    retry: 'Réessayer',
     pinTitle: "Saisissez votre PIN pour voir votre solde. Il n'est pas envoyé à l'assistant ni conservé dans le chat.",
     pinPlaceholder: 'PIN',
     pinSubmit: 'Déverrouiller le solde',
@@ -174,19 +185,44 @@ const SECRET = /pin|otp|pass|voucher|code|cvv|token|secret|mdp/i;
 // Chip reasons for a disputed transaction (a dispute, a wrong transfer, a reversal, a debit with no credit): the chip
 // click starts a drafted message. Fraud cues and plain "contact the bank" endings keep opening the handoff directly.
 const DISPUTE_REASONS = ['dispute', 'wrong_transfer', 'reversal', 'debit_without_credit', 'reversal_in_progress'];
+// Poor connections (ticket 50): a failed or stalled send is retried after these delays (ms), then the customer decides.
+const BACKOFF = [1000, 2000, 4000, 8000, 16000];
+const SLOW_MS = 8000; // no byte for this long: say so
+const STALL_MS = 30000; // no byte for this long: give up on the request and retry it
+const newId = () => (globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`);
+const lost = (e) => Object.assign(e instanceof Error ? e : new Error(String(e)), { retriable: true });
+const brandColor = (value) => {
+  if (typeof value !== 'string') return null;
+  const color = value.trim();
+  if (/^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i.test(color)) return color;
+  const channels = /^(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})$/.exec(color);
+  if (!channels || channels.slice(1).some((channel) => Number(channel) > 255)) return null;
+  return `rgb(${channels.slice(1).join(' ')})`;
+};
 const RESUME_KEY = 'bank-assistant:prefill';
 const RESUME_MS = 60_000;
 const text = (v, max) => (typeof v === 'string' && v.length <= max ? v : null);
 
 class BankAssistant extends HTMLElement {
+  static get observedAttributes() { return ['brand-name', 'brand-primary', 'brand-secondary']; }
+
   connectedCallback() {
     this.lang = this.getAttribute('lang') === 'fr' ? 'fr' : 'en';
     this.conversationId = null;
     this.caseView = null;
     this.cursor = 0;
     this.cards = new WeakMap();
+    this.outbox = []; // messages typed but not yet answered, oldest first
+    this.onOnline = () => { clearTimeout(this.retryTimer); this.retryTimer = null; this.pump(); };
+    window.addEventListener('online', this.onOnline);
     this.innerHTML = `
-      <section class="ba-root" aria-label="Assistant">
+      <style>
+        .ba-root [data-role="title"] { color: var(--ba-brand-primary, #2458a8); font-weight: 650; }
+        .ba-root [data-role="send"] { background: var(--ba-brand-primary, #2458a8); border: 1px solid var(--ba-brand-primary, #2458a8); border-radius: .35rem; color: #fff; padding: .4rem .75rem; }
+        .ba-root [data-role="human-chip"] { border-color: var(--ba-brand-secondary, #607080); }
+        .ba-root [data-role="human-chip"][data-prominent="true"] { background: var(--ba-brand-primary, #2458a8); border-color: var(--ba-brand-primary, #2458a8); color: #fff; }
+      </style>
+      <section class="ba-root" data-role="root" aria-label="Assistant">
         <header data-role="title"></header>
         <button data-role="my-cases-button" type="button"></button>
         <section data-role="my-cases-panel" hidden>
@@ -212,6 +248,7 @@ class BankAssistant extends HTMLElement {
         </div>
         <div data-role="messages" aria-live="polite"></div>
         <div data-role="thinking" hidden></div>
+        <p data-role="connection" aria-live="polite" hidden></p>
         <div data-role="solved-prompt" hidden>
           <span data-role="solved-text"></span>
           <button data-role="solved-yes" type="button"></button>
@@ -264,6 +301,7 @@ class BankAssistant extends HTMLElement {
         <p data-role="disclaimer"></p>
       </section>`;
     this.q = (r) => this.querySelector(`[data-role="${r}"]`);
+    this.applyBranding();
     this.q('form').addEventListener('submit', (e) => { e.preventDefault(); this.submit(); });
     this.q('pin-box').addEventListener('submit', (e) => { e.preventDefault(); this.submitPin(); });
     // Only this click opens a handoff: the host hears about it, then the service is asked for a case.
@@ -287,8 +325,32 @@ class BankAssistant extends HTMLElement {
     this.resumeFill();
   }
 
+  attributeChangedCallback() {
+    if (this.q) this.applyBranding();
+  }
+
+  // Branding is data on the host tag; tenant identity never selects code or relaxes service policy.
+  applyBranding() {
+    const name = this.getAttribute('brand-name')?.trim().slice(0, 60) || 'Assistant';
+    const primary = brandColor(this.getAttribute('brand-primary'));
+    const secondary = brandColor(this.getAttribute('brand-secondary'));
+    this.q('title').textContent = name;
+    this.q('title').setAttribute('aria-label', name);
+    this.q('root').setAttribute('aria-label', name);
+    if (primary) this.style.setProperty('--ba-brand-primary', primary);
+    else this.style.removeProperty('--ba-brand-primary');
+    if (secondary) this.style.setProperty('--ba-brand-secondary', secondary);
+    else this.style.removeProperty('--ba-brand-secondary');
+  }
+
+  disconnectedCallback() {
+    window.removeEventListener('online', this.onOnline);
+    clearTimeout(this.retryTimer);
+  }
+
   render() {
     const t = TEXT[this.lang];
+    this.setConnection(this.connection ?? null);
     this.q('title').textContent = t.title;
     this.q('input').placeholder = t.placeholder;
     this.q('send').textContent = t.send;
@@ -310,6 +372,7 @@ class BankAssistant extends HTMLElement {
     this.q('solved-no').textContent = t.no;
     this.renderDraftText();
     this.renderCase();
+    this.applyBranding();
   }
 
   // ---- handoff: the four states the customer sees (bot, waiting for agent, with agent, resolved) ----
@@ -899,7 +962,7 @@ class BankAssistant extends HTMLElement {
   // One call, once per session: the service verifies the cli with the backend
   // under the customer's own token and fixes the ids. Chat works without it
   // (how-to help only), so a failure here is not fatal.
-  async startSession(token) {
+  async startSession(token, signal) {
     const cli = this.getCli?.() ?? this.getAttribute('cli');
     if (!cli && this.getCli && !this.noAccountShown) {
       // A host that supplies a customer id (the portal) gave none: say so once, instead of failing silently.
@@ -914,21 +977,23 @@ class BankAssistant extends HTMLElement {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
         body: JSON.stringify({ cli, tenant: this.getAttribute('tenant'), gating, conversationId: this.conversationId }),
+        signal,
       });
+      if (res.status >= 500 || res.status === 429) { this.sessionDown = true; return; }
       if (!res.ok) return;
       const started = await res.json();
       this.conversationId = started.conversationId;
       this.sessionId = typeof started.sessionId === 'string' ? started.sessionId : null;
       this.sessionStarted = true;
-    } catch { return; /* how-to help still works */ }
-    await this.claimPortalFlag(token); // a balance request then needs no PIN prompt
+    } catch { this.sessionDown = true; return; /* the chat call retries it; how-to help works without a session */ }
+    await this.claimPortalFlag(token, signal); // a balance request then needs no PIN prompt
   }
 
   // The portal checks the PIN once after login and keeps isBalancePinVerified = "1" (and
   // isBalancePinVerified:tel) in sessionStorage. This only passes that flag on: it is a CLIENT CLAIM, not
   // proof. The service accepts it only for the session's own phone, and the backend returns balances to any
   // valid token, so it is a UX safeguard rather than a security control. Without it, the PIN box is used.
-  async claimPortalFlag(token = this.getToken?.() ?? this.getAttribute('token') ?? '') {
+  async claimPortalFlag(token = this.getToken?.() ?? this.getAttribute('token') ?? '', signal) {
     let verified = null;
     let tel = null;
     try {
@@ -936,14 +1001,15 @@ class BankAssistant extends HTMLElement {
       tel = sessionStorage.getItem('isBalancePinVerified:tel');
     } catch { /* storage unavailable: use the PIN box */ }
     if (verified !== '1') return false;
-    return this.unlock(token, { portalFlag: { verified, tel } }).then((r) => r.ok, () => false);
+    return this.unlock(token, { portalFlag: { verified, tel } }, signal).then((r) => r.ok, () => false);
   }
 
-  async unlock(token, payload) {
+  async unlock(token, payload, signal) {
     const res = await fetch(`${this.getAttribute('api') ?? ''}/unlock`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...this.authHeaders(token) },
       body: JSON.stringify({ conversationId: this.conversationId, ...payload }),
+      signal,
     });
     if (res.status === 401) this.dropSession();
     return { ok: res.ok, status: res.status, body: await res.json().catch(() => ({})) };
@@ -967,7 +1033,7 @@ class BankAssistant extends HTMLElement {
         this.q('pin-box').hidden = true;
         const again = this.pendingMessage;
         this.pendingMessage = null;
-        if (again) await this.ask(again, { resend: true });
+        if (again) { this.outbox.unshift(this.resendTurn(again)); await this.pump(); }
         return;
       }
       note.textContent = status === 403 ? t.pinWrong(body.attemptsLeft) : status === 423 ? t.pinBlocked : status === 401 ? t.pinExpired : t.pinUnavailable;
@@ -986,37 +1052,135 @@ class BankAssistant extends HTMLElement {
   async submit() {
     const input = this.q('input');
     const message = input.value.trim();
-    if (!message || this.busy) return;
+    if (!message) return;
     input.value = '';
-    await this.ask(message);
+    const turn = { id: newId(), message, attempts: 0, bubble: this.addMessage('user', message) };
+    if (this.outbox.length || this.pumping) turn.bubble.dataset.state = 'queued';
+    this.outbox.push(turn);
+    await this.pump();
   }
 
-  async ask(message, { resend = false } = {}) {
-    this.busy = true;
+  resendTurn(message) { return { id: newId(), message, attempts: 0, bubble: null, resend: true }; }
+
+  // Sends the outbox in order, one message at a time. A message stays at the head until it is answered, so nothing is
+  // lost or sent out of order; it keeps its id across retries, so the service never runs it twice.
+  async pump() {
+    if (this.pumping || this.retryTimer || this.outbox[0]?.failed) return;
+    this.pumping = true;
+    try {
+      while (this.outbox.length) {
+        const turn = this.outbox[0];
+        if (globalThis.navigator?.onLine === false) { // wait for the browser's 'online' event
+          this.setConnection('reconnecting');
+          if (turn.bubble) turn.bubble.dataset.state = 'queued';
+          return;
+        }
+        if (turn.bubble) delete turn.bubble.dataset.state;
+        const result = await this.attempt(turn);
+        if (result.retry) {
+          if (turn.attempts >= BACKOFF.length) { this.giveUp(turn); return; }
+          this.setConnection('reconnecting');
+          this.retryTimer = setTimeout(() => { this.retryTimer = null; this.pump(); }, BACKOFF[turn.attempts]);
+          turn.attempts += 1;
+          return;
+        }
+        this.outbox.shift();
+        this.setConnection(null);
+        // A balance needs an unlock: try the portal's flag again (it may have been set since load), else ask for the PIN.
+        if (result.pinNeeded && !turn.resend) {
+          if (await this.claimPortalFlag()) this.outbox.unshift(this.resendTurn(turn.message));
+          else this.showPinBox(turn.message);
+        }
+      }
+    } finally { this.pumping = false; }
+  }
+
+  setConnection(state) {
+    this.connection = state;
+    const el = this.q('connection');
+    if (!el) return;
+    el.hidden = !state;
+    el.dataset.state = state ?? '';
+    el.textContent = state ? TEXT[this.lang][state === 'slow' ? 'slow' : 'reconnecting'] : '';
+  }
+
+  // Out of retries: the reply (or the message) is shown as not finished, and the customer chooses when to try again.
+  giveUp(turn) {
+    const t = TEXT[this.lang];
+    turn.failed = true;
+    this.setConnection(null);
+    if (turn.reply) turn.reply.dataset.incomplete = 'true';
+    const box = document.createElement('div');
+    box.dataset.role = 'retry-box';
+    const note = document.createElement('span');
+    note.dataset.role = 'incomplete';
+    note.textContent = turn.reply ? t.incomplete : t.notSent;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.role = 'retry';
+    button.textContent = t.retry;
+    button.addEventListener('click', () => { box.remove(); turn.failed = false; turn.attempts = 0; this.pump(); });
+    box.append(note, button);
+    this.q('messages').appendChild(box);
+  }
+
+  // One delivery of one message. Returns { retry: true } when the connection failed (the same id is sent again later),
+  // otherwise { pinNeeded } when the turn ended, whether it answered or showed an error.
+  async attempt(turn) {
+    const { message } = turn;
+    const messages = this.q('messages');
+    // A repeat delivery draws the reply again from the start: drop what the failed one added (never the typed messages).
+    if (turn.before) for (const c of [...messages.children]) if (!turn.before.has(c) && c.dataset.from !== 'user') c.remove();
     this.fillRun = null; // a waiting pre-fill ends when the customer moves on to something else
-    if (!resend) this.addMessage('user', message);
     let pinNeeded = false;
     this.q('thinking').hidden = false;
     let bubble = null;
     let guides = [];
     let automated = false;
     let expired = false;
+    let finished = false;
+    let retry = false;
+    const ctl = new AbortController();
+    let slowTimer;
+    let stallTimer;
+    const arm = () => {
+      clearTimeout(slowTimer);
+      clearTimeout(stallTimer);
+      if (this.connection === 'slow') this.setConnection(null);
+      slowTimer = setTimeout(() => this.setConnection('slow'), SLOW_MS);
+      stallTimer = setTimeout(() => ctl.abort(), STALL_MS);
+    };
     try {
       const token = this.getToken?.() ?? this.getAttribute('token') ?? '';
-      await this.startSession(token);
-      const res = await fetch(`${this.getAttribute('api') ?? ''}/chat`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', ...this.authHeaders(token) },
-        body: JSON.stringify({ message, conversationId: this.conversationId, tenant: this.getAttribute('tenant') }),
-      });
+      this.sessionDown = false;
+      arm();
+      await this.startSession(token, ctl.signal);
+      if (this.sessionDown) throw lost(new Error('session')); // never fall back to a guest chat because the network blinked
+      turn.before = new Set(messages.children);
+      arm();
+      let res;
+      try {
+        res = await fetch(`${this.getAttribute('api') ?? ''}/chat`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...this.authHeaders(token) },
+          body: JSON.stringify({ message, messageId: turn.id, conversationId: this.conversationId, tenant: this.getAttribute('tenant') }),
+          signal: ctl.signal,
+        });
+      } catch (e) { throw lost(e); }
       if (res.status === 401) { this.dropSession(); expired = true; } // no silent retry: the next message starts a new session
+      if (res.status >= 500 || res.status === 429) throw lost(new Error(`HTTP ${res.status}`));
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
       for await (const ev of readEvents(res.body)) {
-        if (ev.type === 'case') {
+        arm();
+        if (this.connection) this.setConnection(null);
+        if (ev.type === 'thinking') {
+          if (ev.conversationId) this.conversationId = ev.conversationId; // a drop before the end can still resume this chat
+        } else if (ev.type === 'case') {
           automated = ev.automated === true; // the bot answering while a case waits for an agent
         } else if (ev.type === 'delta') {
           if (!bubble && automated) this.addAutomatedLabel();
           bubble ??= this.addMessage('assistant');
+          turn.reply = bubble;
           bubble.textContent += ev.text;
         } else if (ev.type === 'action_card') {
           this.addActionCard(ev);
@@ -1042,6 +1206,7 @@ class BankAssistant extends HTMLElement {
         } else if (ev.type === 'guides') {
           guides = ev.guides;
         } else if (ev.type === 'done') {
+          finished = true;
           this.conversationId = ev.conversationId;
           if (TEXT[ev.language]) { this.lang = ev.language; this.render(); }
           if (guides.length) this.addChip(`${TEXT[this.lang].used}${this.lang === 'fr' ? ' : ' : ': '}${guides.map((g) => g.title).join(', ')}`);
@@ -1049,18 +1214,21 @@ class BankAssistant extends HTMLElement {
           throw new Error(ev.code);
         }
       }
-    } catch {
-      const target = bubble ?? this.addMessage('assistant');
-      if (!target.textContent) target.textContent = expired ? TEXT[this.lang].pinExpired : TEXT[this.lang].error;
+      if (!finished) throw lost(new Error('cut off')); // the stream ended without its closing event
+    } catch (err) {
+      if (err?.retriable || err?.name === 'AbortError') {
+        retry = true;
+        if (bubble) bubble.dataset.incomplete = 'true';
+      } else {
+        const target = bubble ?? this.addMessage('assistant');
+        if (!target.textContent) target.textContent = expired ? TEXT[this.lang].pinExpired : TEXT[this.lang].error;
+      }
     } finally {
+      clearTimeout(slowTimer);
+      clearTimeout(stallTimer);
       this.q('thinking').hidden = true;
-      this.busy = false;
     }
-    // A balance needs an unlock: try the portal's flag again (it may have been set since load), else ask for the PIN.
-    if (pinNeeded && !resend) {
-      if (await this.claimPortalFlag()) await this.ask(message, { resend: true });
-      else this.showPinBox(message);
-    }
+    return { retry, pinNeeded };
   }
 }
 
@@ -1069,7 +1237,9 @@ async function* readEvents(body) {
   const decoder = new TextDecoder();
   let buffer = '';
   for (;;) {
-    const { done, value } = await reader.read();
+    let chunk;
+    try { chunk = await reader.read(); } catch (e) { throw lost(e); }
+    const { done, value } = chunk;
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     let i;
