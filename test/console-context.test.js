@@ -364,9 +364,31 @@ test('the console shows the priority flag, summary labelled "may be wrong", mask
   assert.match(records[0], /\*\*\*\*8901/);
   assert.match(records[0], /J\. P\. M\./);
   assert.doesNotMatch(w.document.body.textContent, /Jean|12345678901/);
-  assert.equal(w.q('transcript-box').open, false, 'the raw transcript is collapsed...');
-  assert.ok(w.q('transcript-box').querySelector('summary'), '...behind one click');
+  assert.equal(w.q('transcript-box').open, true, 'the conversation is the primary reading area');
   assert.ok(w.qa('line').some((l) => /wrong person/.test(l.textContent)));
+});
+
+test('the queue uses the masked case summary returned by the service', async (t) => {
+  const { svc, open } = await handoff(t);
+  const { body: { ref } } = await open();
+  const w = await consolePage(svc, t, 'aline');
+  await w.until(() => w.qa('case-row').some((item) => item.dataset.ref === ref));
+
+  assert.match(w.qa('case-row').find((item) => item.dataset.ref === ref).textContent, /customer says a transfer/i);
+});
+
+test('the console identifies a summary regenerated when the case is claimed', async (t) => {
+  const m = model({ summaries: ['Initial handoff summary.', 'Updated handoff summary.'] });
+  const { svc, open, say } = await handoff(t, { m });
+  const { body: { ref } } = await open();
+  await say('What are the fees for this transfer?');
+  const w = await consolePage(svc, t, 'aline', `/console?case=${ref}`);
+  await w.until(() => w.q('detail-ref')?.textContent.includes(ref));
+
+  w.q('claim').click();
+  await w.until(() => w.q('summary-text').textContent === 'Updated handoff summary.');
+
+  assert.match(w.q('summary-label').textContent, /regenerated when claimed/i);
 });
 
 test('the console shows the confirmed draft in its own block', async (t) => {

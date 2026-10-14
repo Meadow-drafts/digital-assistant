@@ -123,7 +123,10 @@ function renderQueue(cases) {
     if (c.waitLevel) b.dataset.level = c.waitLevel;
     const ref = document.createElement('span'); ref.className = 'case-ref'; ref.textContent = c.ref;
     const state = document.createElement('span'); state.className = `pill ${c.state === 'waiting' ? 'waiting' : c.state === 'with_agent' ? 'assigned' : ''}`; state.textContent = label(c);
-    const summary = document.createElement('span'); summary.className = 'case-summary'; summary.textContent = c.priority ? 'Wrong transfer · priority case' : c.state === 'resolved' ? 'Resolved customer case' : c.state === 'waiting' ? 'Waiting for an agent' : `Conversation with ${c.claimedBy ?? 'an agent'}`;
+    const summary = document.createElement('span'); summary.className = 'case-summary';
+    summary.textContent = c.queueSummary
+      ? `${c.queueSummarySource === 'assistant' ? 'AI summary · may be wrong' : 'Customer draft'}: ${c.queueSummary}`
+      : c.priority ? 'Priority case · wrong transfer' : 'No case summary available';
     const wait = document.createElement('span'); wait.className = 'case-wait';
     wait.textContent = c.waitingSeconds === null ? (c.priority ? 'Priority' : '') : `waiting ${clock(c.waitingSeconds)}${c.waitingFor === 'reply' ? ' for a reply' : ''}${SLOW[c.waitLevel] ?? ''}`;
     b.append(ref, state, summary, wait);
@@ -144,7 +147,9 @@ function renderContext(d) {
   $('draft').hidden = !d.draft;
   $('draft-text').textContent = d.draft ?? '';
   $('summary').hidden = !d.summary && !d.summaryUnavailable;
-  $('summary-label').textContent = d.summary?.label ?? '';
+  $('summary-label').textContent = d.summary
+    ? `${d.summary.label}${d.summary.regenerated ? ' · regenerated when claimed' : ''}`
+    : '';
   $('summary-text').textContent = d.summary?.text ?? (d.summaryUnavailable ? 'No summary available' : '');
   $('records-box').hidden = !d.records?.length;
   $('records').replaceChildren(...(d.records ?? []).map((r) => {
