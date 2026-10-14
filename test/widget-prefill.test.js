@@ -74,6 +74,18 @@ test('a known beneficiary and an ordinary amount show no double-check line', asy
   assert.equal(card().querySelector('[data-role="double-check"]'), null);
 });
 
+test('a repeated recent payment warning is visible in the real widget and does not add a required action', async (t) => {
+  const { card } = await setup(t, {
+    message: `Send 5000 to ${WALLET}`,
+    params: { destination: WALLET, amount: 5000 },
+    rows: [row(alice(), { telop: WALLET, codewalop: WALLET, mtrans: 5000 })],
+  });
+  assert.match(card().querySelector('[data-role="double-check"]').textContent, /Is this beneficiary and amount right\?/);
+  assert.equal(card().querySelectorAll('button').length, 1);
+  assert.equal(card().querySelector('button').textContent, 'Click here to send money');
+  assert.doesNotMatch(card().textContent, new RegExp(WALLET));
+});
+
 test('Open and review asks the host to navigate, then fills the form fields with a native setter and input events; nothing else', async (t) => {
   const { page, open } = await setup(t);
   await open();
