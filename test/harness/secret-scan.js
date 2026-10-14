@@ -90,7 +90,7 @@ export async function drive(t, extra = {}) {
   await say_(`my balance please, pin ${PIN}`);
   events.push(await (await unlock({ pinHash: sha512(BOX_PIN) })).json());
   await say_(`my balance please, pin ${PIN}`);
-  // navigate and pre-fill, a question no guide covers
+  // Transfer question with values: even a legacy fill proposal from the fake model must be discarded.
   await say_(`Send 5000 to 237677000555 for rent, pin ${PIN}`);
   await say_(`something unknown, otp ${OTP}`);
   // drafted case message to chat and email

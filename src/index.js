@@ -56,8 +56,7 @@ for (const o of allowedOrigins) {
 const outputAllowlist = { urlHosts: list('OUTPUT_ALLOW_URL_HOSTS'), emails: list('OUTPUT_ALLOW_EMAILS'), phones: list('OUTPUT_ALLOW_PHONES') };
 // Pages the assistant may offer as cards; the bank edits this file when the portal's routes change.
 const navigation = loadNavigation(process.env.NAVIGATE_ROUTES ?? new URL('../config/navigate-routes.json', import.meta.url));
-// Form pre-fill is switched off: a request to do a task gets a "Click here" link to the page and the guide's steps, and the
-// customer fills the form themselves. (The pre-fill code and config/prefill.json stay in the repo, unused.)
+// The assistant provides verified steps and allowlisted page links. Customers enter all values themselves.
 const port = Number(process.env.PORT ?? 3000);
 const agents = support.agents;
 const consoleUrl = process.env.CONSOLE_URL ?? `http://localhost:${port}/console`;

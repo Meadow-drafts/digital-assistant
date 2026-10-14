@@ -57,20 +57,14 @@ Stories 95 and 96 (scoreboard, scripted replay) belong to the later phases (tick
 | 32 | `explain-failure.test.js` and `widget-next-step.test.js`: exactly one step; History card is entitlement-validated and rendered, otherwise a human step. Ticket 56 is done. | Proven |
 | 33 | explain-failure: per-outcome loop "chip prominent / calm" | Proven |
 
-## Navigate and pre-fill (T2)
+## Navigate and guide (T2)
 
 | # | Proof | Status |
 |---|---|---|
 | 34 | navigate: "a proposed allowlisted page becomes a navigate card built from the service config, not from the model text"; widget-navigate | Proven |
-| 35 | prefill: "airtime, bill payment and request to pay each have their own registry fields". A 16-digit request-to-pay payer typed in full is redacted by the PIN shield and cannot be pre-filled | Proven, with **limit, ticket 58** |
-| 36 | prefill: "a pre-fill proposal becomes a card built from the registry..."; widget-prefill: "the card shows the masked beneficiary, the amount with a summary and one Open and review button" | Proven |
-| 37 | widget-prefill: "the assistant never presses Next, Confirm or Proceed, never submits..." (jsdom stand-ins of the portal forms; the real forms are in the portal checklist) | Proven (jsdom only, ticket 57) |
-| 38 | widget-prefill: "every assistant-filled field carries a banner, and editing a field clears only its own banner" | Proven (jsdom only, ticket 57) |
-| 39 | prefill: "registry cannot be edited to list a PIN, OTP, password or voucher field"; widget-prefill: "never touches PIN, OTP, password or voucher inputs", "secret by type" | Proven |
-| 40 | prefill: "double-check line shows for a new beneficiary, for a large amount, and when history cannot be read"; "only a line on the card" | Proven, with **limit, ticket 58** |
-| 41 | prefill: "beneficiary is filled only if the customer typed it"; "chosen from the customer own history by transaction reference" | Proven |
-| 42 | widget-prefill: "a field the page does not have is not invented: the card shows the values to copy"; "when the form never appears, every value is shown to copy" | Proven |
+| 35-42 | Historical pre-fill stories and tests are retired by the owner decision (2026-10-14). The current contract is guide steps plus an allowlisted page link; values are entered by the customer. | Superseded |
 | 43 | navigate: "a config edit cannot add approvals, PIN or password change, a route with a record id, or a path that leaves the portal" | Proven |
+| Current behavior | `task-link.test.js`: valued transfer request discards a legacy pre-fill proposal and returns guide steps plus only a navigation card; `widget-navigate.test.js`: clicking that card does not change form inputs or emit a pre-fill event. | Proven (local fakes, jsdom) |
 
 ## Human help and handoff
 
@@ -143,7 +137,7 @@ Stories 95 and 96 (scoreboard, scripted replay) belong to the later phases (tick
 | 93 | howto: failed-question entry; retention: failed-question log follows retention | Proven |
 | 94 | Ticket 34 is done: `eval/` runs the real service through configured adapters and records per-language results. Qwen has partial EN/FR results with errors; Gemini artifacts contain only errored items. | Partly proven; full item coverage remains incomplete |
 | 95, 96 | Later phase (tickets 40, 39) | Not core |
-| 97 | navigate and howto package tests; prefill: "pages and forms the customer package, role or session do not allow are dropped". Package data is client-supplied in the demo (hand-over item, ticket 35) | Proven (demo trust model) |
+| 97 | navigation and how-to package tests: pages the customer's package, role or session do not allow are not offered. Package data is client-supplied in the demo (hand-over item, ticket 35) | Proven (demo trust model) |
 | 98 | production-gate: each prerequisite missing in turn, several at once, demo with none, the real entry point | Proven |
 
 ## Summary

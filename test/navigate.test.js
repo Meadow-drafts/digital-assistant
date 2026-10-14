@@ -148,7 +148,7 @@ const route = (path, over = {}) => ({ button: { en: 'Open and review', fr: 'Ouvr
 test('the shipped config lists exactly the nine allowlisted pages with the portal route paths', () => {
   const navigation = loadNavigation(NAVIGATION);
 
-  assert.deepEqual([...navigation.routes].filter(([, r]) => !r.prefillOnly).map(([id, r]) => [id, r.path]), [
+  assert.deepEqual([...navigation.routes].map(([id, r]) => [id, r.path]), [
     ['overview', '/overview'],
     ['history', '/history'],
     ['account_history', '/history/account'],
@@ -160,7 +160,7 @@ test('the shipped config lists exactly the nine allowlisted pages with the porta
     ['request_to_pay', '/request-to-pay'],
   ]);
   assert.equal(navigation.routes.get('account_history').primaryOnly, true);
-  assert.deepEqual([...navigation.routes].filter(([, r]) => r.prefillOnly).map(([id]) => id), [], 'every page is a plain page now');
+  assert.ok([...navigation.routes.values()].every((r) => !Object.hasOwn(r, 'prefillOnly')), 'all configured pages are ordinary navigation destinations');
 });
 
 test('a config edit cannot add approvals, PIN or password change, a route with a record id, or a path that leaves the portal', () => {

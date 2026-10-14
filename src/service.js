@@ -8,10 +8,8 @@ import { parseRefusal, refusalCard } from './refusals.js';
 import { BLOCKED, createOutputFilter } from './filter.js';
 import { chipState, cuesIn, parseEscalate, questionKey } from './chip.js';
 import { PROTECTED_TEXTS, modelHistory, UNSUPPORTED_ID, answerMessages, dataMessages, explainMessages, routerMessages } from './prompts.js';
-import { asksForUnavailable, intentTool, isNavigationAsk } from './intents.js';
-import { prefillIntent, PREFILL_BY_RULE, NO_SESSION_FOR_FORM, asksToComplete } from './prefill-intent.js';
+import { asksForUnavailable, asksToComplete, intentTool, isNavigationAsk } from './intents.js';
 import { offeredPages, parseNavigate, routeIdForPath, stepsOf, validateProposal } from './navigate.js';
-import { offeredForms, parsePrefill, validatePrefill } from './prefill.js';
 import { GUIDE_ID, NEXT_STEP, OUTCOMES, TEXT as EXPLAIN_TEXT, parseNext } from './explain.js';
 import { MESSAGES as T1_MESSAGES, TOOL_RULES, UNLOCK_MS, createT1, parseToolCall } from './t1.js';
 import { createIdentity, guestOwnerOf, ownerOf, subjectOf, tokenOf } from './identity.js';
@@ -102,7 +100,7 @@ const OVERVIEW_WORDS = /\b(overview|dashboard|home ?page|accueil|vue d.ensemble|
 const referencesOf = (result) => [result?.transaction?.reference, ...(result?.transactions ?? []).map((t) => t.reference)]
   .filter((r) => typeof r === 'string' && r.length >= 4);
 
-export function createService({ allowedOrigins = [], devPage, model, gateway, clock, audit: auditSink, guides, navigation, prefill, scamCues, entitlements, failedQuestions, outputAllowlist, limits, mailer, agents, support, consoleUrl, retention, sessionSecret, sessionTtlMs, database }) {
+export function createService({ allowedOrigins = [], devPage, model, gateway, clock, audit: auditSink, guides, navigation, scamCues, entitlements, failedQuestions, outputAllowlist, limits, mailer, agents, support, consoleUrl, retention, sessionSecret, sessionTtlMs, database }) {
   // Every audit record goes through the trail: complete fields, nothing secret-shaped stored.
   const audit = createAuditTrail({ sink: auditSink, clock });
   // Failed questions are stored masked and cut short, through one write point (the sink itself stays for the dashboard and the retention job).
@@ -356,7 +354,6 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     let toolAudit = null;
     let nextTag = null;
     let navigateAudit = null;
-    let prefillAudit = null;
     // The model's text is held back until it has been read in full: the refusal
     // tag comes off the front before anything reaches the customer.
     const answer = async (messages, { known, navigate } = {}) => {
@@ -366,39 +363,23 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
       const escalated = parseEscalate(refused.text);
       const nexted = parseNext(escalated.text);
       nextTag = nexted.next;
-      const prefilled = parsePrefill(nexted.text);
-      const navigated = parseNavigate(prefilled.text);
-      const parsed = { category: refused.category, text: navigated.text };
+      const fillTag = /\[\[prefill:[\s\S]*?\]\]/i.test(nexted.text);
+      const withoutFill = nexted.text.replace(/\[\[prefill:[\s\S]*?\]\]/gi, '');
+      const navigated = parseNavigate(withoutFill);
+      const parsed = { category: refused.category, text: fillTag && navigate?.guided ? (navigate.fallback || NO_VERIFIED_STEPS[language]) : navigated.text };
       let overrode = null;
       // A guide was picked for a task and the answer still refused it as "execute": over-refusal. The assistant never
       // executes anything either way, so the customer gets the guide's steps (and the page link) unless they asked the
       // assistant itself to complete or approve it.
-      if (parsed.category === 'execute' && navigate?.guided && prefilled.proposal === null && navigated.proposal === null && !asksToComplete(message)) {
+      if (parsed.category === 'execute' && navigate?.guided && navigated.proposal === null && !asksToComplete(message)) {
         overrode = 'execute';
         parsed.category = null;
         parsed.text = navigate.fallback || NO_VERIFIED_STEPS[language];
       }
-      // A proposal is checked before anything is shown. If it is dropped, the model's words (which may point at the
-      // card or a page) are replaced by the steps of the guide it answered from.
+      // A navigation proposal is checked before it is shown. If it is dropped, the reply uses verified guide steps.
       let card = null;
       let checkedProposal = null;
-      let checkedPrefill = null;
-      if (navigate && prefilled.proposal !== null && !parsed.category) {
-        // The tag is always taken off the text; a form is only offered when the registry accepts every value.
-        const checked = prefill
-          ? await validatePrefill({
-            registry: prefill, navigation, proposal: prefilled.proposal, language, entitlements: navigate.entitlements,
-            session: navigate.prefill?.conversation.session, message, history: navigate.prefill?.history ?? (async () => null),
-          })
-          : { ok: false, reason: 'not_available', form: null };
-        if (checked.ok) {
-          card = checked.card;
-          checkedPrefill = checked.audit;
-        } else {
-          checkedPrefill = { outcome: 'dropped', reason: checked.reason, form: checked.form };
-          parsed.text = navigate.fallback || NO_VERIFIED_STEPS[language];
-        }
-      } else if (navigate && navigated.proposal !== null && !parsed.category) {
+      if (navigate && navigated.proposal !== null && !parsed.category) {
         const checked = validateProposal(navigation, navigated.proposal, language, navigate.entitlements);
         const plain = /^[a-z_]{1,32}$/.test(navigated.proposal) ? navigated.proposal : null;
         if (checked.ok) {
@@ -450,13 +431,8 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
         return;
       }
       refusal = parsed.category ?? refusal;
-      if (card?.kind === 'prefill' && refusal === 'execute' && !parsed.category) {
-        refusal = null;
-        checkedPrefill = { ...checkedPrefill, overrodeRefusal: 'execute' };
-      }
       if (overrode) checkedProposal = { ...(checkedProposal ?? { outcome: 'none' }), overrodeRefusal: overrode };
       navigateAudit = checkedProposal;
-      prefillAudit = checkedPrefill;
       // The link comes first ("click here"), the steps below it.
       if (card && !refusal) send(res, 'action_card', card);
       reply += parsed.text;
@@ -509,35 +485,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
         }
         const { picks } = routed;
         refusal = routed.refusal;
-        // "Send 5000 to 2376..." is a pre-fill ask the model kept misreading (refusal, or no guide). Rules build the
-        // proposal; the validator checks every value against the customer's own words, as for a model proposal.
-        let ruleFill = null;
-        if (!routed.tool && prefill && navigation && conversation.session && (!routed.refusal || routed.refusal === 'execute')) {
-          const proposal = prefillIntent(message);
-          if (proposal) {
-            let own;
-            ruleFill = await validatePrefill({
-              registry: prefill, navigation, proposal, language, entitlements: ent, session: conversation.session, message,
-              history: () => (own ??= t1 ? t1.ownHistory(conversation, tokenOf(req), ent) : Promise.resolve(null)),
-            });
-          }
-        }
-        // The same clear ask with no account session (the start failed, or the token ended): say so, never guess.
-        const noSession = !routed.tool && !conversation.session && !ruleFill && prefill && navigation && (!routed.refusal || routed.refusal === 'execute') && prefillIntent(message) !== null;
-        if (noSession) {
-          const text = NO_SESSION_FOR_FORM[language];
-          reply += text;
-          send(res, 'delta', { text });
-          refusal = null;
-          outcome = 'no_session_for_form';
-        } else if (ruleFill?.ok) {
-          const text = PREFILL_BY_RULE[language];
-          reply += text;
-          send(res, 'delta', { text });
-          send(res, 'action_card', ruleFill.card);
-          prefillAudit = { ...ruleFill.audit, source: 'rules', ...(routed.refusal ? { overrodeRefusal: routed.refusal } : {}) };
-          refusal = null;
-        } else if (routed.tool) {
+        if (routed.tool) {
           // Without a gateway there is no session to read from: the customer is told to sign in, never that no guide matched.
           const done = t1 ? await t1.run({ call: routed.tool, conversation, token: tokenOf(req), entitlements: ent }) : { kind: 'fixed', code: 'session_expired', name: routed.tool.name };
           if (done.kind === 'data') {
@@ -573,14 +521,10 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
             await failedTrail?.append({ time: new Date(clock.now()).toISOString(), conversationId, tenant: body.tenant ?? null, language, question: message });
           } else {
             const material = picks.map((id) => guides.get(id)?.[language] ?? null).filter(Boolean);
-            // The customer's own history is read at most once per turn, and only if a pre-fill check needs it.
-            let ownRows;
-            const prefillHistory = () => (ownRows ??= t1 ? t1.ownHistory(conversation, tokenOf(req), ent) : Promise.resolve(null));
             // An answer from the unsupported list has no task page: the model is offered no links and none can be drawn.
             const linkable = navigation && used.length > 0;
-            const forms = linkable && prefill ? offeredForms(prefill, navigation, language, ent) : [];
-            await answer(answerMessages(material, picks.includes(UNSUPPORTED_ID) ? guides.unsupported : '', history, linkable ? offeredPages(navigation, language, ent) : [], forms), {
-              navigate: linkable ? { fallback: stepsOf(material[0]?.text ?? ''), entitlements: ent, guided: used.length > 0, guideRoutes: used.map((g) => g.route).filter(Boolean), prefill: { conversation, history: prefillHistory } } : null,
+            await answer(answerMessages(material, picks.includes(UNSUPPORTED_ID) ? guides.unsupported : '', history, linkable ? offeredPages(navigation, language, ent) : []), {
+              navigate: linkable ? { fallback: stepsOf(material[0]?.text ?? ''), entitlements: ent, guided: used.length > 0, guideRoutes: used.map((g) => g.route).filter(Boolean) } : null,
             });
             const closing = used.find((g) => g[language].closing)?.[language].closing;
             if (!refusal && !filtered) {
@@ -631,7 +575,6 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
       ...(refusal ? { refusalCategory: refusal } : {}),
       ...(scam.length ? { scamCues: scam } : {}),
       ...(navigateAudit ? { navigate: navigateAudit } : {}),
-      ...(prefillAudit ? { prefill: prefillAudit } : {}),
       ...(toolAudit ? { tool: toolAudit.name, ...(toolAudit.args ? { toolArgs: toolAudit.args } : {}), toolOutcome: toolAudit.outcome, toolSource: toolAudit.source, ...(toolAudit.reason ? { toolReason: toolAudit.reason } : {}), ...(toolAudit.data ? { toolData: toolAudit.data } : {}) } : {}),
     });
     res.end();

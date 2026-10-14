@@ -411,9 +411,9 @@ export function createT1({ gateway, clock, etab = ETAB }) {
     return { error: 'unavailable' };
   }
 
-  // The customer's own history rows for the pre-fill checks (known beneficiary, usual amount, a chosen past
-  // recipient). The raw rows stay inside the service: never given to the model, the UI or the audit. Null when
-  // they cannot be read (no session, package without history, gateway trouble), which the checks treat as unknown.
+  // The customer's own history rows for read-only answers and agent context. The raw rows stay inside the service:
+  // never given to the model, the UI or the audit. Null when they cannot be read (no session, package without history,
+  // gateway trouble).
   async function ownHistory(conversation, token, entitlements) {
     const { session } = conversation;
     if (!session) return null;

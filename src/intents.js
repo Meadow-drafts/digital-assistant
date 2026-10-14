@@ -4,6 +4,10 @@
 // deliberately narrow: short questions, nobody else's data, no failure story (those go to the guides).
 const norm = (text) => text.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/['’`]/g, ' ');
 
+const COMPLETE_IT = /\b(confirm\w*|approv\w*|validat\w*|execut\w*|go ahead|do it|for me|fais le|vas y|valide\w*|approuve\w*|a ma place|pour moi)\b/;
+// True when the customer asks the assistant itself to complete, confirm or approve something.
+export const asksToComplete = (text) => typeof text === 'string' && COMPLETE_IT.test(norm(text));
+
 const MAX_WORDS = 10;
 const OTHER_PERSON = /\b(colleague|collegue|friend|ami|amie|brother|frere|sister|soeur|wife|husband|mari|femme|mother|mere|father|pere|his|her|their|him|them|someone|quelqu un|marie|account number|numero de compte)\b|\w+ s (account|balance|solde)\b|\bde (ma|mon|mes|ta|ton|son|sa|ses|leur)\b|\d{5,}/;
 const FAILURE = /\b(fail|failed|declined|insufficient|error|refus\w*|why|echec|echoue\w*|insuffisant\w*|erreur|pourquoi|reject\w*|rejet\w*|deducted|debited|debite\w*)\b/;

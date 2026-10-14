@@ -5,11 +5,7 @@
 // el.getToken = () => userToken instead). For account reads the host also
 // provides the customer's cli once (cli attribute or el.getCli) and, until the
 // backend can supply them, gating data (gating attribute or el.getGating).
-// Host events (all cancelable): bank-assistant:navigate {path, target} when a card asks for a page, and
-// bank-assistant:prefill {form, fields} when a pre-fill card has a page to fill. A host that cancels the second one
-// owns the fill (the production hook); otherwise the widget fills matching inputs of the page itself.
-// fill-timeout (attribute, ms): how long to wait for the form to appear after navigating. Without it a card may ask
-// for a longer wait (waitMs, for a form behind several choices the customer makes); the default is 3000.
+// Host event: bank-assistant:navigate {path, target} when a card asks for a page. The widget never fills portal forms.
 // Handoff: only a click on the human chip asks the service for a case (the host also hears
 // bank-assistant:handoff-request). The widget then shows the case banner and polls the service every poll-ms
 // (attribute, default 2000) for the case state and the agent's messages.
@@ -45,11 +41,6 @@ const TEXT = {
     pinExpired: 'Your session has expired. Please sign in again.',
     pinUnavailable: 'The PIN check is unavailable right now. Please try again.',
     disclaimer: 'Automated assistant, it may make mistakes. It will never ask for your PIN or OTP.',
-    beneficiary: 'Beneficiary',
-    amount: 'Amount',
-    filled: 'Filled by the assistant. Check it before you continue.',
-    copyTitle: 'These fields could not be filled. Copy the values:',
-    copy: 'Copy',
     caseWaiting: 'Waiting for an agent',
     caseWithAgent: 'With an agent',
     caseRef: (ref) => `Case ${ref}`,
@@ -121,11 +112,6 @@ const TEXT = {
     pinExpired: 'Votre session a expiré. Veuillez vous reconnecter.',
     pinUnavailable: 'La vérification du PIN est indisponible. Veuillez réessayer.',
     disclaimer: 'Assistant automatique, il peut se tromper. Il ne vous demandera jamais votre PIN ni votre OTP.',
-    beneficiary: 'Bénéficiaire',
-    amount: 'Montant',
-    filled: 'Rempli par l’assistant. Vérifiez avant de continuer.',
-    copyTitle: 'Ces champs n’ont pas pu être remplis. Copiez les valeurs :',
-    copy: 'Copier',
     caseWaiting: "En attente d'un agent",
     caseWithAgent: 'Avec un agent',
     caseRef: (ref) => `Dossier ${ref}`,
@@ -179,9 +165,6 @@ const TEXT = {
 };
 
 const PLAIN_PATH = /^\/(?!\/)[A-Za-z0-9\-/]*$/;
-const PLAIN_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
-// Never filled, whatever a card says: PIN, OTP, password, voucher and code inputs (by name, id or type).
-const SECRET = /pin|otp|pass|voucher|code|cvv|token|secret|mdp/i;
 // Chip reasons for a disputed transaction (a dispute, a wrong transfer, a reversal, a debit with no credit): the chip
 // click starts a drafted message. Fraud cues and plain "contact the bank" endings keep opening the handoff directly.
 const DISPUTE_REASONS = ['dispute', 'wrong_transfer', 'reversal', 'debit_without_credit', 'reversal_in_progress'];
@@ -200,9 +183,6 @@ const brandColor = (value) => {
   if (!channels || channels.slice(1).some((channel) => Number(channel) > 255)) return null;
   return `rgb(${channels.slice(1).join(' ')})`;
 };
-const RESUME_KEY = 'bank-assistant:prefill';
-const RESUME_MS = 60_000;
-const text = (v, max) => (typeof v === 'string' && v.length <= max ? v : null);
 
 class BankAssistant extends HTMLElement {
   static get observedAttributes() { return ['brand-name', 'brand-primary', 'brand-secondary']; }
@@ -212,7 +192,6 @@ class BankAssistant extends HTMLElement {
     this.conversationId = null;
     this.caseView = null;
     this.cursor = 0;
-    this.cards = new WeakMap();
     this.outbox = []; // messages typed but not yet answered, oldest first
     this.onOnline = () => { clearTimeout(this.retryTimer); this.retryTimer = null; this.pump(); };
     window.addEventListener('online', this.onOnline);
@@ -323,7 +302,6 @@ class BankAssistant extends HTMLElement {
     this.q('solved-yes').addEventListener('click', () => this.answerSolved(true));
     this.q('solved-no').addEventListener('click', () => this.answerSolved(false));
     this.render();
-    this.resumeFill();
   }
 
   attributeChangedCallback() {
@@ -757,11 +735,8 @@ class BankAssistant extends HTMLElement {
     this.q('messages').appendChild(el);
   }
 
-  // "Open and review" card for a page the service validated. Everything shown comes from the service's card data
-  // (set as text, never markup); the click only asks the host to go to the page, it submits nothing. The host may
-  // handle bank-assistant:navigate with its router and call preventDefault; otherwise the browser goes to the path.
+  // Navigation card for a page the service validated. Clicking only opens the page; it never fills or submits a form.
   addActionCard(card) {
-    if (card?.kind === 'prefill') return this.addPrefillCard(card);
     if (card?.kind !== 'navigate' || typeof card.path !== 'string' || !PLAIN_PATH.test(card.path)) return;
     const el = document.createElement('div');
     el.dataset.role = 'action-card';
@@ -779,178 +754,6 @@ class BankAssistant extends HTMLElement {
     });
     el.append(label, button);
     this.q('messages').appendChild(el);
-  }
-
-  // "Open and review" card that pre-fills a form. Everything shown comes from the service's card data, set as
-  // text. The click asks the host for the page, then fills the form's inputs; it never presses a button.
-  addPrefillCard(card) {
-    if (typeof card.path !== 'string' || !PLAIN_PATH.test(card.path)) return null;
-    // Only plain, non-secret input names survive, whatever the service sent.
-    const fields = (Array.isArray(card.fields) ? card.fields : []).map((f) => ({
-      field: text(f?.field, 32), label: text(f?.label, 60), value: text(f?.value, 200), display: text(f?.display, 200),
-      dom: Array.isArray(f?.dom) ? f.dom.filter((n) => typeof n === 'string' && PLAIN_NAME.test(n) && !SECRET.test(n)) : [],
-    })).filter((f) => f.field && PLAIN_NAME.test(f.field) && !SECRET.test(f.field) && f.label && f.value !== null && f.display !== null && f.dom.length > 0);
-    const t = TEXT[this.lang];
-    const el = document.createElement('div');
-    el.dataset.role = 'action-card';
-    el.dataset.kind = 'prefill';
-    el.dataset.form = String(card.form);
-    el.dataset.target = String(card.target);
-    const line = (role, value) => {
-      if (typeof value !== 'string' || !value) return;
-      const p = document.createElement('p');
-      p.dataset.role = role;
-      p.textContent = value;
-      el.append(p);
-    };
-    const title = document.createElement('span');
-    title.dataset.role = 'action-label';
-    title.textContent = String(card.title);
-    el.append(title);
-    line('action-summary', card.summary);
-    line('action-beneficiary', card.beneficiary ? `${t.beneficiary}: ${card.beneficiary}` : null);
-    line('action-amount', card.amount ? `${t.amount}: ${card.amount.value} ${card.amount.currency}` : null);
-    line('double-check', card.doubleCheck); // a plain line: it blocks nothing and adds no click
-    line('action-directions', card.directions); // what the customer does first, when the form is behind choices
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = String(card.button);
-    const clean = { ...card, fields, mode: card.mode === 'directions' ? 'directions' : 'fill', directions: text(card.directions, 500), waitMs: Number.isFinite(card.waitMs) ? Math.min(Math.max(card.waitMs, 0), 300000) : null };
-    this.cards.set(el, clean);
-    button.addEventListener('click', () => this.openAndFill(clean, el));
-    el.append(button);
-    this.q('messages').appendChild(el);
-    return el;
-  }
-
-  async openAndFill(card, cardEl) {
-    const go = new CustomEvent('bank-assistant:navigate', { bubbles: true, cancelable: true, detail: { path: card.path, target: card.target } });
-    const hostRoutes = !this.dispatchEvent(go);
-    if (!hostRoutes && window.location.pathname !== card.path) {
-      // A full page load ends this widget: leave a short-lived note so the next one can finish the fill.
-      try { sessionStorage.setItem(RESUME_KEY, JSON.stringify({ at: Date.now(), card })); } catch { /* no storage: the page just opens */ }
-      window.location.assign(card.path);
-      return;
-    }
-    await this.fillCard(card, cardEl);
-  }
-
-  // Picks up the note left before a page load, once, and only if it is fresh.
-  resumeFill() {
-    let note = null;
-    try {
-      note = JSON.parse(sessionStorage.getItem(RESUME_KEY) ?? 'null');
-      sessionStorage.removeItem(RESUME_KEY);
-    } catch { note = null; }
-    if (!note || !(Date.now() - note.at < RESUME_MS) || !note.card) return;
-    const el = this.addPrefillCard(note.card);
-    if (el) this.fillCard(this.cards.get(el), el);
-  }
-
-  // The input for one field: the first matching input of the page (outside this widget) that is a plain, enabled,
-  // non-secret text input or select.
-  findInput(field) {
-    for (const name of field.dom) {
-      for (const el of document.querySelectorAll(`[name="${name}"]`)) {
-        if (this.contains(el)) continue;
-        const tag = el.tagName;
-        if (tag !== 'INPUT' && tag !== 'SELECT' && tag !== 'TEXTAREA') continue;
-        if (el.disabled || el.readOnly) continue;
-        if (tag === 'INPUT' && !['text', 'tel', 'number', 'search', ''].includes((el.getAttribute('type') ?? '').toLowerCase())) continue;
-        if (SECRET.test(`${el.name} ${el.id}`) || /one-time-code|password/i.test(el.getAttribute('autocomplete') ?? '')) continue;
-        if (tag === 'SELECT' && ![...el.options].some((o) => o.value === field.value)) continue;
-        return el;
-      }
-    }
-    return null;
-  }
-
-  async fillCard(card, cardEl) {
-    // A form behind several choices (the card says so): nothing is filled and nothing is waited for. The customer is
-    // sent to the page and given the values to enter, which they already have in the card's directions.
-    if (card.mode === 'directions') {
-      if (card.fields.length) this.showCopyValues(cardEl ?? this.q('messages'), [...card.fields]);
-      return;
-    }
-    // The host may do the fill itself with its own hook; then the widget leaves the page alone.
-    const bridge = new CustomEvent('bank-assistant:prefill', {
-      bubbles: true, cancelable: true, detail: { form: card.form, fields: card.fields.map(({ field, value }) => ({ field, value })) },
-    });
-    if (!this.dispatchEvent(bridge)) return;
-    // How long to keep looking for the inputs: the host's fill-timeout if it set one, else the card's own wait (a form
-    // behind choices the customer makes first), else 3 s. Only this customer's browser waits; the service is not involved.
-    const attr = this.getAttribute('fill-timeout');
-    const waitMs = attr !== null && Number.isFinite(Number(attr)) ? Number(attr) : (card.waitMs ?? 3000);
-    const started = Date.now();
-    const deadline = started + waitMs;
-    // The wait ends early, with nothing more done, when the customer sends another message, leaves the page or the
-    // widget goes away: a form must never fill itself long after the customer moved on.
-    const run = Symbol('fill');
-    this.fillRun = run;
-    const page = window.location.pathname;
-    const stale = () => this.fillRun !== run || !this.isConnected || window.location.pathname !== page;
-    const pending = [...card.fields];
-    for (;;) {
-      for (const field of [...pending]) {
-        const input = this.findInput(field);
-        if (!input) continue;
-        this.fillInput(input, field);
-        pending.splice(pending.indexOf(field), 1);
-      }
-      if (pending.length === 0 || Date.now() >= deadline) break;
-      await new Promise((r) => setTimeout(r, Date.now() - started < 3000 ? 50 : 300));
-      if (stale()) return;
-    }
-    if (this.fillRun === run) this.fillRun = null;
-    if (pending.length) this.showCopyValues(cardEl ?? this.q('messages'), pending);
-  }
-
-  // Native value setter plus an input (or change) event, so the portal's form library sees a normal edit. The
-  // banner is added after the event and goes away the first time the customer edits that field.
-  fillInput(input, field) {
-    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
-    if (!setter) return;
-    setter.call(input, field.value);
-    input.dispatchEvent(new Event(input.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
-    const banner = document.createElement('span');
-    banner.dataset.role = 'assistant-filled';
-    banner.dataset.field = field.field;
-    banner.setAttribute('role', 'note');
-    banner.style.cssText = 'display:block;font-size:12px;color:#8a5a00';
-    banner.textContent = TEXT[this.lang].filled;
-    input.insertAdjacentElement('afterend', banner);
-    const clear = () => {
-      banner.remove();
-      input.removeEventListener('input', clear);
-      input.removeEventListener('change', clear);
-    };
-    input.addEventListener('input', clear);
-    input.addEventListener('change', clear);
-  }
-
-  // Fields the page did not have (or kept locked): the values to copy, as text.
-  showCopyValues(cardEl, fields) {
-    const t = TEXT[this.lang];
-    const box = document.createElement('div');
-    box.dataset.role = 'copy-values';
-    const heading = document.createElement('p');
-    heading.textContent = t.copyTitle;
-    const list = document.createElement('ul');
-    for (const field of fields) {
-      const li = document.createElement('li');
-      li.dataset.field = field.field;
-      li.append(document.createTextNode(`${field.label}: `));
-      const value = document.createElement('code');
-      value.textContent = field.value;
-      const copy = document.createElement('button');
-      copy.type = 'button';
-      copy.textContent = t.copy;
-      copy.addEventListener('click', () => { navigator.clipboard?.writeText(field.value).catch(() => {}); });
-      li.append(value, copy);
-      list.append(li);
-    }
-    box.append(heading, list);
-    cardEl.append(box);
   }
 
   addChip(text) {
@@ -1129,7 +932,6 @@ class BankAssistant extends HTMLElement {
   // otherwise { pinNeeded } when the turn ended, whether it answered or showed an error.
   async attempt(turn) {
     const { message } = turn;
-    this.fillRun = null; // a waiting pre-fill ends when the customer moves on to something else
     let pinNeeded = false;
     this.q('thinking').hidden = false;
     let bubble = null;

@@ -14,8 +14,7 @@ async function ask(t, { message, route, answer, gating, calls }) {
     if (req.purpose === 'route') { calls?.push(req); return typeof route === 'function' ? route(req, calls?.length ?? 0) : route; }
     return answer;
   });
-  // Pre-fill is off in the product (the harness switches it on by default), so these run without it.
-  const svc = await start({ customers: [a], model, prefill: undefined });
+  const svc = await start({ customers: [a], model });
   t.after(svc.close);
   const id = await begin(svc, a, gating ? { gating } : undefined);
   return { a, svc, model, ...(await say(svc, a, message, id)) };
@@ -62,6 +61,18 @@ test('"send money" refused as execute by the answer model is over-refusal: the c
   assert.doesNotMatch(replyOf(events), /cannot execute/);
   assert.match(replyOf(events), /\S/);
   assert.equal(svc.audit.records.at(-1).navigate.overrodeRefusal, 'execute');
+});
+
+test('a legacy pre-fill proposal is discarded: valued requests get guide steps and navigation only', async (t) => {
+  const { events, svc } = await ask(t, {
+    message: 'Send 5000 to 237677000555', route: '["transfer-single"]',
+    answer: '[[prefill:single_transfer {"destination":"237677000555","amount":5000}]]I filled the form with 5000 for 237677000555.',
+  });
+
+  assert.deepEqual(cardsOf(events).map((card) => [card.kind, card.target, card.path]), [['navigate', 'transfer', '/transfer']]);
+  assert.match(replyOf(events), /Single Transfer/);
+  assert.doesNotMatch(replyOf(events), /filled the form|5000|237677000555/i);
+  assert.equal(svc.audit.records.at(-1).prefill, undefined);
 });
 
 test('asking the assistant itself to complete or approve something is still refused, with no link', async (t) => {
@@ -115,7 +126,7 @@ test('Overview is only linked when the customer asked for it, and a "take me to"
 test('with no account session the package is unknown: no task link (fail closed), and the audit says why', async (t) => {
   const a = alice();
   const model = createFakeModel((req) => (req.purpose === 'route' ? '["airtime"]' : 'Open Airtime.'));
-  const svc = await start({ customers: [a], model, prefill: undefined });
+  const svc = await start({ customers: [a], model });
   t.after(svc.close);
 
   const { events } = await say(svc, a, 'buy airtime', undefined); // no session was started for this conversation

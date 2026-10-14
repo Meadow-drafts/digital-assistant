@@ -30,19 +30,12 @@ const EXPLAIN_RULES = 'Explain in plain language why the transfer below failed, 
   'If the message is not in the guide, say you cannot tell the reason; never invent one. Do not write a closing next step; the service adds it. ' +
   'Start your reply with [[next:retry]] if the guide says the customer can fix it by changing something and trying again, otherwise with [[next:human]].';
 
-// The pages the service may turn into an "Open and review" card. The model only names an id from the list it is
+// The pages the service may turn into a navigation link. The model only names an id from the list it is
 // given; the service checks it again and draws the card itself, so the model never writes a link, path or label.
 const NAVIGATE_RULES = 'If the customer wants to do something that has a page in the list below, add exactly one tag [[navigate:ID]] using that id, ' +
   'and only if the page is what the steps point to. Use the overview page only when the customer asked for the overview; for a task, use the page where the task is done. Never write a link, a path or a button label yourself; the service draws the link.';
 
-// The forms the service may pre-fill. The model names a form id and the values the customer gave; the service checks
-// every value against what the customer said and their own history, and draws the card itself.
-const PREFILL_RULES = 'If the customer asks you to send money, top up airtime, pay a bill or request a payment and gives the values, ' +
-  'you may add exactly one tag [[prefill:FORM_ID {"field":value}]] using a form id from the list below and ONLY the fields listed for it. ' +
-  'Use only values the customer wrote in their latest message, exactly as written; leave out any field they did not give and never guess one. ' +
-  'Never include a PIN, OTP, password or code. Do not say you filled, sent or confirmed anything: tell the customer to open the form, review it and submit it themselves.';
-
-export const PROTECTED_TEXTS = [ROUTER_RULES, ANSWER_RULES, EXPLAIN_RULES, NAVIGATE_RULES, PREFILL_RULES];
+export const PROTECTED_TEXTS = [ROUTER_RULES, ANSWER_RULES, EXPLAIN_RULES, NAVIGATE_RULES];
 
 // Customer text is untrusted data. Each user turn goes to the model inside one
 // delimited block, and anything in it that could forge the block's end or a
@@ -61,12 +54,11 @@ export function routerMessages(index, history, { tools = '', retry = false } = {
   return [{ role: 'system', content: system }, ...modelHistory(history.slice(-4))];
 }
 
-export function answerMessages(guides, unsupported, history, pages = [], forms = []) {
+export function answerMessages(guides, unsupported, history, pages = []) {
   const parts = guides.map((g) => g.text);
   if (unsupported) parts.push(`# NOT AVAILABLE IN THE PORTAL\n${unsupported}`);
   const nav = pages.length ? `\n\n${NAVIGATE_RULES}\n# PAGES\n${pages.map((p) => `${p.id}: ${p.label}`).join('\n')}` : '';
-  const fill = forms.length ? `\n\n${PREFILL_RULES}\n# FORMS\n${forms.map((f) => `${f.id}: ${f.fields.join('; ')}`).join('\n')}` : '';
-  return [{ role: 'system', content: `${ANSWER_RULES}${nav}${fill}\n\n# GUIDES\n${parts.join('\n\n---\n\n')}` }, ...modelHistory(history)];
+  return [{ role: 'system', content: `${ANSWER_RULES}${nav}\n\n# GUIDES\n${parts.join('\n\n---\n\n')}` }, ...modelHistory(history)];
 }
 
 // Data read for the customer (already masked). Anything inside it, such as a

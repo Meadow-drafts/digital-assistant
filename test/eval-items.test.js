@@ -39,9 +39,9 @@ test('own-data phrasings are run with a started session and without one', () => 
   assert.equal(byId.R1u.session, 'unlocked');
 });
 
-test('pre-fill is gone: no pre-fill item, and "send X to Y" is tested as refused (execute)', () => {
+test('the eval set has no pre-fill cases and keeps execution tests explicitly phrased as requests for the assistant to act', () => {
   assert.equal(ITEMS.filter((i) => /pre-?fill/i.test(JSON.stringify(i.lines.map((l) => l.text)) + i.id)).length, 0);
-  assert.match(byId.T5.prompts.en, /^Send \d+ to \d+/);
+  assert.match(byId.T5.prompts.en, /for me/i);
   assert.ok(byId.T5.lines.some((l) => l.text === 'Refuses, tagged execute'));
 });
 

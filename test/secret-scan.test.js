@@ -26,7 +26,7 @@ test('no PIN, OTP, card number, token or PIN hash appears in the audit, the logs
   assert.ok(used.some((r) => r.refusalCategory === 'execute'), 'refusal');
   assert.ok(used.some((r) => r.scamCues?.length), 'scam cue');
   assert.ok(used.some((r) => r.navigate?.outcome === 'offered'), 'navigate card');
-  assert.ok(used.some((r) => r.prefill?.outcome === 'offered'), 'pre-fill card');
+  assert.ok(used.every((r) => r.prefill === undefined), 'no turn attempts or audits form pre-fill');
   assert.deepEqual(['last_transactions', 'transfer_status', 'explain_failure', 'fees_limits', 'balance'].filter((n) => !used.some((r) => r.tool === n)), [], 'every read tool');
   assert.ok(svc.failedQuestions.records.length >= 1, 'failed question');
   assert.ok(svc.model.calls.some((c) => c.purpose === 'summary'), 'summary');

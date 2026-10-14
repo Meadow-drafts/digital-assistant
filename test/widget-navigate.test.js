@@ -47,6 +47,27 @@ test('Open and review only asks the host to navigate to the validated path: noth
   assert.deepEqual(sent, before, 'no chat, session or other request is made by the click');
 });
 
+test('a valued payment request navigates without changing any portal form input', async (t) => {
+  const { w, navigations } = await setup(t, { answer: 'Choose Single Transfer and enter the details yourself.', message: 'Send 5000 to 237677000555' });
+  const form = w.document.createElement('form');
+  const amount = w.document.createElement('input');
+  amount.name = 'mtrans';
+  const destination = w.document.createElement('input');
+  destination.name = 'account';
+  form.append(amount, destination);
+  w.document.body.append(form);
+  let fills = 0;
+  w.document.addEventListener('bank-assistant:prefill', () => { fills += 1; });
+
+  await w.until(() => w.q('action-card'));
+  w.q('action-card').querySelector('button').click();
+
+  assert.equal(amount.value, '');
+  assert.equal(destination.value, '');
+  assert.equal(fills, 0);
+  assert.deepEqual(navigations, [{ path: '/transfer', target: 'transfer' }]);
+});
+
 test('a card with a path that is not a plain portal path is not rendered', async (t) => {
   const { w } = await setup(t, { answer: 'Open the Transfers page.' });
   const el = w.document.querySelector('bank-assistant');
