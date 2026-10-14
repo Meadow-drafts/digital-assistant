@@ -54,7 +54,7 @@
     [data-role=case-row][data-level=warning] { border-left:4px solid #c78324; }
     [data-role=case-row][data-level=urgent] { border-left:4px solid var(--urgent); }
     .case-ref { font-weight:700; font-variant-numeric:tabular-nums; }
-    .case-summary { color:#384351; }
+    .case-summary { color:#384351; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .case-wait { color:var(--muted); text-align:right; font-variant-numeric:tabular-nums; }
     .pill { display:inline-block; width:max-content; border-radius:99px; padding:.15rem .55rem; background:#edf0f3; color:#475261; font-size:.79rem; font-weight:650; }
     .pill.priority { background:#fff0ed; color:var(--urgent); }
@@ -148,7 +148,7 @@
         <div data-role="summary" class="block" hidden><h3 data-role="summary-label"></h3><div data-role="summary-text"></div></div>
         <div class="workspace" data-role="workspace">
           <section data-role="chat" aria-label="Customer conversation">
-            <details data-role="transcript-box"><summary>Conversation transcript</summary><div data-role="transcript" aria-live="polite"></div></details>
+            <details data-role="transcript-box" open><summary>Conversation transcript</summary><div data-role="transcript" aria-live="polite"></div></details>
             <div class="row responsive"><label class="small" for="suggest-count">Draft replies</label><select id="suggest-count" data-role="suggest-count" aria-label="Number of draft replies"><option value="1">1 draft</option><option value="2">2 drafts</option><option value="3" selected>3 drafts</option></select><button data-role="suggest" type="button">Suggest replies</button><span class="note small">Drafts only · choose to edit, then send</span></div>
             <p class="note" data-role="suggestions-message" role="status" aria-live="polite"></p><div data-role="suggestions"></div>
             <form data-role="reply-form" class="row responsive"><textarea data-role="reply-input" maxlength="1000" autocomplete="off" aria-label="Reply to the customer" placeholder="Write a reply to the customer…"></textarea><button class="primary" data-role="reply-send" type="submit">Send reply</button></form>
