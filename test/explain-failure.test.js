@@ -95,7 +95,7 @@ const OUTCOMES = [
   { name: 'a pending transfer', over: { sta: '1000', msg: null }, next: 'history', chip: [],
     en: /still pending.*Do not retry it: check History first/, fr: /en attente.*Ne réessayez pas : vérifiez d'abord dans Historique/ },
   { name: 'a successful transfer', over: { sta: '01', msg: null }, next: 'history', chip: [],
-    en: /went through/, fr: /a abouti/ },
+    en: /record reports transfer.*completed/, fr: /relevé de la banque indique.*terminé/ },
   { name: 'a reversed transfer', over: { reversedAt: '2026-10-12T08:00:00.000+00:00' }, next: 'history', chip: [],
     en: /reversal on transfer.*2026-10-12/, fr: /annulation sur le transfert.*2026-10-12/ },
   { name: 'a re-debited transfer', over: { reDebited: true }, next: 'history', chip: [],
@@ -161,7 +161,7 @@ for (const lang of ['en', 'fr']) {
 
     const said = (r, reference) => textOf(r.events).replaceAll(reference, '<ref>');
     assert.equal(said(unknown, 'REF-NOPE'), said(others, 'REF-BOB'));
-    assert.match(textOf(others.events), lang === 'en' ? /cannot find a transfer with the reference REF-BOB on your wallet/ : /ne trouve aucun transfert avec la référence REF-BOB sur votre portefeuille/);
+    assert.match(textOf(others.events), lang === 'en' ? /cannot find a transfer with the reference REF-BOB in your wallet/ : /ne trouve pas de transfert avec la référence REF-BOB dans votre portefeuille/);
     for (const r of [unknown, others]) {
       assert.ok(!r.model.calls.some((c) => c.purpose === 'answer'));
       assert.deepEqual(nextSteps(r.events).map((x) => x.kind), ['history']);
@@ -353,6 +353,6 @@ test('a numeric currency code from the bank is shown as XAF, as the portal does,
   for (const [dev, shown] of [['001', 'XAF'], ['59', 'XAF'], ['EUR', 'EUR']]) {
     const { events } = await ask(t, { rows: (a) => [status(a, { sta: '01', msg: null, dev })], message: MESSAGE.en, answer: 'unused' });
 
-    assert.match(textOf(events), new RegExp(`Transfer REF-0001 \\(15000 ${shown},`));
+    assert.match(textOf(events), new RegExp(`transfer REF-0001 \\(15000 ${shown},`));
   }
 });

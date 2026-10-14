@@ -60,6 +60,24 @@ const GENERIC_CLOSING = {
   en: 'If this does not help, use "Talk to a human agent".',
   fr: "Si cela ne vous aide pas, utilisez « Parler à un agent ».",
 };
+const TRANSFER_COMPLAINT = /\b(?:sent|transferred|transfer(?:red)?|paid)\b.{0,100}\b(?:hasn['’]?t|has not|didn['’]?t|did not|never|not)\b.{0,40}\b(?:received|arrived|credited|got)\b|\b(?:ne\s+(?:l['’])?a\s+pas|n['’]?a\s+pas|pas encore)\b.{0,35}\b(?:recu|arrive|credit)\b|\b(?:envoye|transfere|paye)\b.{0,100}\b(?:pas recu|pas arrive|pas credite)\b/i;
+const TRANSFER_REFERENCE = /\b(?:reference|ref|r[eé]f[eé]rence|id)\b(?=[\s:#])(?:\s+(?:is|est)\s+|\s*[:#]\s*|\s+)([A-Za-z0-9._-]{4,64})/i;
+const HISTORY_HELP = {
+  en: 'I’m sorry the recipient has not received it. When did you send the transfer?',
+  fr: "Je suis désolé que le destinataire ne l'ait pas reçu. Quand avez-vous envoyé le transfert ?",
+};
+const HISTORY_REFERENCE_HELP = {
+  en: 'Open History and find the row for this transfer. Copy the transaction reference shown there (for example, ntrans or nhis) and paste it here. I will check only that reference against your wallet.',
+  fr: "Ouvrez Historique et repérez la ligne de ce transfert. Copiez la référence de transaction affichée (par exemple ntrans ou nhis), puis collez-la ici. Je vérifierai uniquement cette référence dans votre portefeuille.",
+};
+const findSuppliedReference = (message) => {
+  const explicit = TRANSFER_REFERENCE.exec(message)?.[1];
+  if (explicit) return explicit;
+  const bare = /^\s*([A-Za-z0-9._-]{4,64})[.!?,;:]?\s*$/.exec(message);
+  if (bare && !/[0-9_-]/.test(bare[1])) return null;
+  return bare?.[1] ?? null;
+};
+const isTransferComplaint = (message) => TRANSFER_COMPLAINT.test(message.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, ''));
 
 async function collect(stream) {
   let text = '';
@@ -526,6 +544,13 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
       const t = result.transaction;
       const d = result.detail;
       let next = OUTCOMES[outcome]?.next ?? null;
+      const guidedTransfer = conversation.transferSupport?.stage === 'checking';
+      if (guidedTransfer && outcome === 'succeeded') next = 'human';
+      if (guidedTransfer && outcome === 'not_found') {
+        conversation.transferSupport.attempts += 1;
+        conversation.transferSupport.stage = conversation.transferSupport.attempts > 1 ? 'result' : 'reference';
+        next = conversation.transferSupport.attempts > 1 ? 'human' : 'history';
+      }
       // The history step is the navigate card for History, so it follows the same package and connect rules. Where the
       // page is not offered the step (and any wording that points to it) becomes the human one.
       const historyPage = next === 'history' && navigation ? validateProposal(navigation, 'history', language, ent) : null;
@@ -540,35 +565,77 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
         next = nextTag === 'retry' ? 'retry' : 'human';
         if (next === 'human') chipReasons.push('contact_bank');
       } else {
-        const text = outcome === 'not_found' ? EXPLAIN_TEXT.not_found[language](reference) : EXPLAIN_TEXT[outcome][language](t, d, historyOpen);
+        let text = outcome === 'not_found' ? EXPLAIN_TEXT.not_found[language](reference, historyOpen) : EXPLAIN_TEXT[outcome][language](t, d, historyOpen);
+        if (guidedTransfer && outcome === 'succeeded') text += language === 'fr'
+          ? ' Demandez au destinataire de vérifier son compte ; si le transfert manque toujours, un agent peut vous aider.'
+          : ' Ask the recipient to check their account; if it is still missing, a human agent can help.';
         reply += text;
         send(res, 'delta', { text });
         if (OUTCOMES[outcome].chip) chipReasons.push(OUTCOMES[outcome].chip);
       }
+      if (guidedTransfer && outcome !== 'not_found') conversation.transferSupport.stage = 'result';
       // a refusal or a blocked reply already carries its own fixed next-step card
       if (refusal || filtered) return;
+      if (guidedTransfer && next === 'human' && !chipReasons.includes('contact_bank')) chipReasons.push('contact_bank');
       const text = `\n\n${NEXT_STEP[next][language](reference)}`;
       reply += text;
       send(res, 'delta', { text });
       send(res, 'next_step', { kind: next, ...(historyOpen ? { target: 'history', card: historyPage.card } : {}), text: text.trim() });
+      if (guidedTransfer) send(res, 'quick_replies', { options: language === 'fr'
+        ? ['Où trouver la référence ?', 'Vérifier un autre transfert', 'Parler à un agent']
+        : ['Where do I find the reference?', 'Check another transfer', 'Talk to an agent'] });
     };
     try {
       if (guides) {
         const ent = await entitlementsFor(req, body.tenant, conversation);
         const available = guides.availableFor(ent);
         const page = verifiedPageContext(body.pageContext, { navigation, availableGuides: available, language, now: clock.now() });
+        const pendingTransfer = conversation.transferSupport ?? null;
+        const complaint = isTransferComplaint(message);
+        let transferReply = null;
+        let transferTool = null;
+        if (complaint && !pendingTransfer) conversation.transferSupport = { stage: 'timing', attempts: 0 };
+        let transfer = conversation.transferSupport;
+        const selectionText = message.normalize('NFD').replace(/\p{Diacritic}/gu, '');
+        const findReferenceRequest = /where do i find (?:the )?reference|where is (?:the )?reference|ou trouver la reference|ou se trouve la reference/i.test(selectionText);
+        const anotherTransfer = /check another transfer|another transfer|verifier un autre transfert|autre transfert/i.test(selectionText);
+        if (transfer?.stage === 'result') {
+          if (complaint) conversation.transferSupport = transfer = { stage: 'timing', attempts: 0 };
+          else if (findReferenceRequest || anotherTransfer) transfer.stage = 'reference';
+          else { delete conversation.transferSupport; transfer = null; }
+        }
+        if (transfer) {
+          const suppliedReference = findSuppliedReference(message);
+          if (suppliedReference) {
+            transferTool = { name: 'explain_failure', rawArgs: JSON.stringify({ reference: suppliedReference }) };
+            transfer.stage = 'checking';
+          } else if (transfer.stage === 'timing') {
+            transfer.stage = 'reference';
+            transferReply = HISTORY_REFERENCE_HELP[language];
+          } else if (anotherTransfer || findReferenceRequest) {
+            transfer.stage = 'reference';
+            transferReply = HISTORY_REFERENCE_HELP[language];
+          } else {
+            transferReply = HISTORY_REFERENCE_HELP[language];
+          }
+          if (complaint && !pendingTransfer) transferReply = HISTORY_HELP[language];
+        }
         const selected = pendingClarification?.guideIds
           .map((id) => available.find((guide) => guide.id === id))
           .find((guide) => guide && normalizeChoiceText(guide[language].title, language) === normalizeChoiceText(message, language));
-        let routed = selected
-          ? { picks: [selected.id], refusal: null }
-          : await routeGuides({ model: turnModel, language, available, guides, history, tools: t1 ? TOOL_RULES : '', page });
+        let routed = transferTool
+          ? { picks: [], refusal: null, tool: transferTool, toolSource: 'customer_reference' }
+          : transferReply
+            ? { picks: [], refusal: null }
+            : selected
+              ? { picks: [selected.id], refusal: null }
+              : await routeGuides({ model: turnModel, language, available, guides, history, tools: t1 ? TOOL_RULES : '', page });
         // Common account-transfer and vague help phrasing was model-routed inconsistently.
         // Resolve it after the model has had a chance to refuse unsafe asks.
-        if (!selected && routed.refusal === 'execute' && !asksToComplete(message)) {
+        if (!transferTool && !transferReply && !selected && routed.refusal === 'execute' && !asksToComplete(message)) {
           routed = await routeGuides({ model: turnModel, language, available, guides, history, tools: t1 ? TOOL_RULES : '', retry: true, page });
         }
-        if (!selected && !routed.tool && (!routed.refusal || routed.refusal === 'execute' && !asksToComplete(message))) {
+        if (!transferTool && !transferReply && !selected && !routed.tool && (!routed.refusal || routed.refusal === 'execute' && !asksToComplete(message))) {
           routed = transferGuideIntent(message, available) ?? routed;
         }
         let askClarification = false;
@@ -595,9 +662,28 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
           reply = question;
           send(res, 'guides', { guides: [] });
           send(res, 'clarification', { question, options });
+        } else if (transferReply) {
+          let text = transferReply;
+          const canNavigate = navigation ? validateProposal(navigation, 'history', language, ent) : null;
+          if (transfer.stage === 'reference' && !canNavigate?.ok) {
+            text = language === 'fr'
+              ? 'Je ne peux pas ouvrir Historique pour votre profil. Utilisez « Parler à un agent » pour obtenir de l’aide.'
+              : 'History is not available for your profile. Use “Talk to a human agent” for help.';
+            chipReasons.push('contact_bank');
+          }
+          reply += text;
+          send(res, 'delta', { text });
+          if (transfer.stage === 'reference' && canNavigate?.ok) send(res, 'action_card', canNavigate.card);
+          if (transfer.stage === 'reference') send(res, 'quick_replies', { options: canNavigate?.ok
+            ? language === 'fr' ? ['Où trouver la référence ?', 'Vérifier un autre transfert', 'Parler à un agent'] : ['Where do I find the reference?', 'Check another transfer', 'Talk to an agent']
+            : language === 'fr' ? ['Parler à un agent'] : ['Talk to an agent'] });
+          send(res, 'guides', { guides: [] });
         } else if (routed.tool) {
           // Without a gateway there is no session to read from: the customer is told to sign in, never that no guide matched.
-          const done = t1 ? await t1.run({ call: routed.tool, conversation, token: tokenOf(req), entitlements: ent }) : { kind: 'fixed', code: 'session_expired', name: routed.tool.name };
+          const guidedTransferLocked = conversation.transferSupport?.stage === 'checking' && ent?.packages && !ent.packages.includes('HIST');
+          const done = guidedTransferLocked
+            ? { kind: 'fixed', code: 'not_in_package', name: routed.tool.name }
+            : t1 ? await t1.run({ call: routed.tool, conversation, token: tokenOf(req), entitlements: ent }) : { kind: 'fixed', code: 'session_expired', name: routed.tool.name };
           if (done.kind === 'data') {
             const masked = JSON.stringify(done.result);
             toolAudit = { name: done.name, args: done.args, outcome: 'ok', data: masked, source: routed.toolSource };
@@ -612,13 +698,16 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
               send(res, 'delta', { text });
             }
           } else {
-            const text = T1_MESSAGES[done.code][language];
+            const text = guidedTransferLocked
+              ? language === 'fr' ? 'La consultation du statut nécessite l’accès à Historique. Utilisez « Parler à un agent » pour obtenir de l’aide.' : 'Checking a transfer needs History access. Use “Talk to a human agent” for help.'
+              : T1_MESSAGES[done.code][language];
             toolAudit = { name: done.name, outcome: done.code, source: routed.toolSource, ...(done.reason ? { reason: done.reason } : {}) };
             outcome = done.code === 'rejected' ? 'tool_rejected' : done.code;
             reply += text;
             send(res, 'tool_blocked', { code: done.code, text });
             send(res, 'delta', { text });
             if (!['session_expired', 'pin_required'].includes(done.code)) chipReasons.push(`tool_${done.code}`);
+            if (guidedTransferLocked) chipReasons.push('contact_bank');
           }
         } else {
           const used = picks.filter((id) => id !== UNSUPPORTED_ID).map((id) => guides.get(id));

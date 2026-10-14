@@ -50,8 +50,8 @@ const when = (d) => (d.reversedAt ? { en: ` on ${d.reversedAt}`, fr: ` le ${d.re
 // the History page is offered to this customer; when it is not, the text must not point to it.
 export const TEXT = {
   succeeded: {
-    en: (t) => `Transfer ${label(t)} went through: its status is successful, so there is no failure to explain.`,
-    fr: (t) => `Le transfert ${label(t)} a abouti : son statut est réussi, il n'y a donc pas d'échec à expliquer.`,
+    en: (t) => `The bank's record reports transfer ${label(t)} as completed. That status alone does not confirm that the recipient's account was credited.`,
+    fr: (t) => `Le relevé de la banque indique que le transfert ${label(t)} est terminé. Ce statut seul ne confirme pas que le compte du destinataire a été crédité.`,
   },
   pending: {
     en: (t, d, history) => `Transfer ${label(t)} is still pending (Payment Pending). Do not retry it${history ? ': check History first' : ''}.`,
@@ -74,8 +74,8 @@ export const TEXT = {
     fr: (t) => `Je ne peux pas déterminer l'état du transfert ${label(t)} avec les données que je peux lire, donc je ne vais pas deviner.`,
   },
   not_found: {
-    en: (reference) => `I cannot find a transfer with the reference ${reference} on your wallet. Please check the reference.`,
-    fr: (reference) => `Je ne trouve aucun transfert avec la référence ${reference} sur votre portefeuille. Veuillez vérifier la référence.`,
+    en: (reference, history) => `I cannot find a transfer with the reference ${reference} in your wallet. ${history ? 'Please check the reference on your History row.' : 'Please check the reference you entered.'}`,
+    fr: (reference, history) => `Je ne trouve pas de transfert avec la référence ${reference} dans votre portefeuille. ${history ? 'Vérifiez la référence dans la ligne de votre Historique.' : 'Vérifiez la référence saisie.'}`,
   },
 };
 
@@ -86,8 +86,8 @@ export const NEXT_STEP = {
     fr: () => 'Prochaine étape : corrigez ce que le message indique, puis réessayez le transfert.',
   },
   history: {
-    en: () => 'Next step: open History to check this transfer.',
-    fr: () => 'Prochaine étape : ouvrez Historique pour vérifier ce transfert.',
+    en: () => 'Next step: open History to check this transfer and resend its displayed reference once.',
+    fr: () => 'Prochaine étape : ouvrez Historique pour vérifier ce transfert et renvoyez une fois la référence affichée.',
   },
   human: {
     en: (reference) => `Next step: use "Talk to a human agent" and give them the reference ${reference}.`,

@@ -23,6 +23,7 @@ export function createConversationStore({ database = null } = {}) {
     feedback: (conversation.feedback ?? []).map(({ answerId, rating, at }) => ({ answerId, rating, at })),
     ...(conversation.pendingClarification ? { pendingClarification: conversation.pendingClarification } : {}),
     ...(conversation.lastReference === undefined ? {} : { lastReference: conversation.lastReference }),
+    ...(conversation.transferSupport ? { transferSupport: { stage: conversation.transferSupport.stage, attempts: conversation.transferSupport.attempts } } : {}),
   });
 
   function flush() {
@@ -55,6 +56,7 @@ export function createConversationStore({ database = null } = {}) {
         owner: row.owner, history: stored.history, language: stored.language, asked: new Set(stored.asked), feedback: stored.feedback ?? [], session: null,
         lastActiveAt: row.last_active_at, ...(stored.lastReference === undefined ? {} : { lastReference: stored.lastReference }),
         ...(stored.pendingClarification ? { pendingClarification: stored.pendingClarification } : {}),
+        ...(stored.transferSupport ? { transferSupport: stored.transferSupport } : {}),
       });
     }
   }

@@ -206,6 +206,7 @@ class BankAssistant extends HTMLElement {
         .ba-root [data-role="human-chip"] { border-color: var(--ba-brand-secondary, #607080); }
         .ba-root [data-role="human-chip"][data-prominent="true"] { background: var(--ba-brand-primary, #2458a8); border-color: var(--ba-brand-primary, #2458a8); color: #fff; }
         .ba-root [data-role="clarification-options"] { display: flex; flex-wrap: wrap; gap: .4rem; margin: .4rem 0; }
+        .ba-root [data-role="quick-replies"] { display: flex; flex-wrap: wrap; gap: .4rem; margin: .4rem 0; }
       </style>
       <section class="ba-root" data-role="root" aria-label="Assistant">
         <header data-role="title"></header>
@@ -779,6 +780,29 @@ class BankAssistant extends HTMLElement {
     this.q('messages').appendChild(choices);
   }
 
+  addQuickReplies(event) {
+    this.q('messages').querySelectorAll('[data-role="quick-replies"]').forEach((choices) => choices.remove());
+    const choices = document.createElement('div');
+    choices.dataset.role = 'quick-replies';
+    for (const option of event.options ?? []) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.role = 'quick-reply';
+      button.textContent = option;
+      button.addEventListener('click', () => {
+        for (const choice of choices.querySelectorAll('button')) choice.disabled = true;
+        if (/^(talk to (?:a )?human agent|talk to an agent|parler à un agent)$/i.test(option)) {
+          this.q('human-chip').click();
+          return;
+        }
+        this.q('input').value = option;
+        this.submit();
+      });
+      choices.appendChild(button);
+    }
+    this.q('messages').appendChild(choices);
+  }
+
   // Fixed next-step card from the service (human chip or a form shortcut); the text is never model-written.
   addCard(card) {
     const el = document.createElement('div');
@@ -911,6 +935,7 @@ class BankAssistant extends HTMLElement {
     const message = input.value.trim();
     if (!message) return;
     input.value = '';
+    this.q('messages').querySelectorAll('[data-role="quick-replies"]').forEach((choices) => choices.remove());
     const turn = { id: newId(), message, attempts: 0, bubble: this.addMessage('user', message) };
     if (this.outbox.length || this.pumping) turn.bubble.dataset.state = 'queued';
     this.outbox.push(turn);
@@ -1066,6 +1091,8 @@ class BankAssistant extends HTMLElement {
           guides = ev.guides;
         } else if (ev.type === 'clarification') {
           this.addClarification(ev);
+        } else if (ev.type === 'quick_replies') {
+          this.addQuickReplies(ev);
         } else if (ev.type === 'done') {
           finished = true;
           this.conversationId = ev.conversationId;

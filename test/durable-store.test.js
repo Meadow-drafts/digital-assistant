@@ -82,6 +82,19 @@ test('after a restart the customer still sees their case, with the session id fr
   assert.equal(listed.body.cases[0].openedAt, '2026-10-12T09:00:00.000Z', 'the original opening time');
 });
 
+test('guided transfer context survives a service restart so the timing answer still leads to History', async (t) => {
+  const a = alice();
+  const ctx = await world(t, { customers: [a] });
+  const customer = await customerOn(ctx.svc, a);
+  await say(ctx.svc, a, 'I sent money, but my sister has not received it.', customer.conversationId);
+
+  const svc = await ctx.restart();
+  await resume(svc, a, customer);
+  const result = await say(svc, a, 'This morning.', customer.conversationId);
+  assert.match(result.events.filter((event) => event.type === 'delta').map((event) => event.text).join(''), /Open History/i);
+  assert.equal(svc.gateway.calls.some((call) => call.path === '/digitalbank/history/bipay-recent'), false);
+});
+
 test('a case is the customer\'s alone after a restart: another customer sees nothing of it', async (t) => {
   const [a, b] = [alice(), bob()];
   const ctx = await world(t, { customers: [a, b] });
