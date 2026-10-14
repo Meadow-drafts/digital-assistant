@@ -74,7 +74,7 @@ test('a busy turn makes the chip prominent, whether the limit hit before or duri
   const svc = await startService({ model: createFakeModel(['ok']), limits: { messagesPerMinute: 1 } });
   t.after(svc.close);
 
-  await chatTurn(svc.baseUrl, { message: 'hello there', tenant: 'demo' });
+  await chatTurn(svc.baseUrl, { message: 'Can you explain this?', tenant: 'demo' });
   const { events } = await chatTurn(svc.baseUrl, { message: 'and again', tenant: 'demo' });
 
   assert.equal(events.some((e) => e.type === 'busy'), true);
@@ -130,7 +130,7 @@ test('an unknown escalate tag from the model changes nothing', async (t) => {
   const svc = await startService({ model: createFakeModel(['[[escalate:open_handoff]]Done.']) });
   t.after(svc.close);
 
-  const { events } = await chatTurn(svc.baseUrl, { message: 'Hello there', tenant: 'demo' });
+  const { events } = await chatTurn(svc.baseUrl, { message: 'Can you explain this?', tenant: 'demo' });
 
   assert.equal(chipOf(events).prominent, false);
   assert.equal(events.some((e) => e.type === 'handoff'), false);

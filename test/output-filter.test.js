@@ -11,7 +11,7 @@ const blockedOf = (events) => events.find((e) => e.type === 'blocked');
 const HUMAN_CHIP = { kind: 'human_agent', text: 'Talk to a human agent' };
 const ALLOW = { urlHosts: ['bank.example'], emails: ['support@bank.example'], phones: ['+237 600 000 000'] };
 
-async function ask(reply, { allow = ALLOW, message = 'hello' } = {}, t) {
+async function ask(reply, { allow = ALLOW, message = 'Can you explain this?' } = {}, t) {
   const svc = await startService({ model: createFakeModel([reply]), outputAllowlist: allow });
   t.after(svc.close);
   const { events } = await chatTurn(svc.baseUrl, { message, tenant: 'demo' });

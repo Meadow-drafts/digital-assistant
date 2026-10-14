@@ -120,14 +120,14 @@ test('exactly the allowed number of tool calls is fine', async (t) => {
 test('the global token budget per minute makes everyone busy until the window passes', async (t) => {
   const svc = await start(t, { tokensPerMinute: 100 }, createFakeModel(['z'.repeat(400)]));
 
-  const first = await say(svc, 'hello', 'user-a');
-  const second = await say(svc, 'hello', 'user-b');
+  const first = await say(svc, 'Can you explain this?', 'user-a');
+  const second = await say(svc, 'Can you explain this?', 'user-b');
 
   assert.equal(busyOf(first.events), undefined);
   assert.equal(busyOf(second.events).limit, 'token_budget');
 
   await svc.clock.advance(MINUTE);
-  assert.equal(busyOf((await say(svc, 'hello', 'user-b')).events), undefined);
+  assert.equal(busyOf((await say(svc, 'Can you explain this?', 'user-b')).events), undefined);
 });
 
 test('the global daily request budget makes everyone busy until the next day', async (t) => {
@@ -149,9 +149,9 @@ const usingModel = (totalTokens, text = 'ok') => createFakeModel([[text, { usage
 test('the global daily token budget counts the tokens the provider reports, and makes everyone busy with the reason in the audit', async (t) => {
   const svc = await start(t, { tokensPerDay: 100, tokensPerMinute: 1_000_000 }, usingModel(100));
 
-  const first = await say(svc, 'hello', 'user-a');
+  const first = await say(svc, 'Can you explain this?', 'user-a');
   const calls = svc.model.calls.length;
-  const second = await say(svc, 'hello', 'user-b');
+  const second = await say(svc, 'Can you explain this?', 'user-b');
 
   assert.equal(busyOf(first.events), undefined);
   assert.deepEqual(busyOf(second.events), { type: 'busy', limit: 'daily_token_budget', text: 'The assistant is busy right now. Please try again in a moment, or talk to a human agent.', card: HUMAN_CHIP });
@@ -170,10 +170,10 @@ test('the daily token budget is not reached while the reported usage stays under
 for (const [label, offset, busy] of [['1 s before 24 hours', -1000, true], ['exactly 24 hours', 0, false], ['1 s after 24 hours', 1000, false]]) {
   test(`daily token budget, rolling window: ${label} after the tokens were used, the customer is ${busy ? 'still busy' : 'served again'}`, async (t) => {
     const svc = await start(t, { tokensPerDay: 100, tokensPerMinute: 1_000_000 }, usingModel(100));
-    await say(svc, 'hello', 'user-a');
+    await say(svc, 'Can you explain this?', 'user-a');
 
     await svc.clock.advance(DAY + offset);
-    const later = await say(svc, 'hello again', 'user-b');
+    const later = await say(svc, 'Can you explain this again?', 'user-b');
 
     assert.equal(busyOf(later.events)?.limit, busy ? 'daily_token_budget' : undefined);
   });
@@ -196,7 +196,7 @@ test('the agent summary written at handoff counts toward the daily token budget'
   const svc = await startWithBank({ customers: [a], model, limits: { tokensPerDay: 500, tokensPerMinute: 1_000_000 } });
   t.after(svc.close);
   const conversationId = await begin(svc, a);
-  assert.equal(busyOf((await sayAs(svc, a, 'hello', conversationId)).events), undefined, 'the chat itself is far under the budget');
+  assert.equal(busyOf((await sayAs(svc, a, 'Can you explain this?', conversationId)).events), undefined, 'the chat itself is far under the budget');
 
   await call(svc.baseUrl, 'POST', '/handoff', { token: a.token, body: { conversationId } });
   for (let i = 0; i < 100 && !model.calls.some((c) => c.purpose === 'summary'); i++) await new Promise((r) => setTimeout(r, 10));
@@ -210,18 +210,18 @@ test('a turn that takes the budget over it is allowed to finish, and the audit r
   const model = createFakeModel((request) => ['ok', { usage: { totalTokens: request.purpose === 'answer' ? 150 : 0 } }]);
   const svc = await start(t, { tokensPerDay: 100, tokensPerMinute: 1_000_000 }, model);
 
-  const crossing = await say(svc, 'hello', 'user-a');
+  const crossing = await say(svc, 'Can you explain this?', 'user-a');
   assert.equal(replyOf(crossing.events), 'ok', 'the customer still gets the answer');
   assert.equal(svc.audit.records[0].tokenOvershoot, 50);
 
-  const blocked = await say(svc, 'hello', 'user-b');
+  const blocked = await say(svc, 'Can you explain this?', 'user-b');
   assert.equal(busyOf(blocked.events)?.limit, 'daily_token_budget');
   assert.equal(svc.audit.records.at(-1).tokenOvershoot, undefined);
 });
 
 test('a turn that stays under the daily budget has no overshoot in the audit', async (t) => {
   const svc = await start(t, { tokensPerDay: 1000, tokensPerMinute: 1_000_000 }, usingModel(1));
-  await say(svc, 'hello', 'user-a');
+  await say(svc, 'Can you explain this?', 'user-a');
   assert.equal(svc.audit.records[0].tokenOvershoot, undefined);
 });
 
@@ -231,8 +231,8 @@ test('at the daily budget a handoff still opens, the summary is still attempted 
   const svc = await startWithBank({ customers: [a], model, limits: { tokensPerDay: 500, tokensPerMinute: 1_000_000 } });
   t.after(svc.close);
   const conversationId = await begin(svc, a);
-  await sayAs(svc, a, 'hello', conversationId); // takes the budget over
-  assert.equal(busyOf((await sayAs(svc, a, 'hello again', conversationId)).events)?.limit, 'daily_token_budget');
+  await sayAs(svc, a, 'Can you explain this?', conversationId); // takes the budget over
+  assert.equal(busyOf((await sayAs(svc, a, 'Can you explain this again?', conversationId)).events)?.limit, 'daily_token_budget');
 
   const { status, body } = await call(svc.baseUrl, 'POST', '/handoff', { token: a.token, body: { conversationId } });
   const aline = await agentLogin(svc.baseUrl, 'aline');
@@ -247,9 +247,9 @@ test('at the daily budget a handoff still opens, the summary is still attempted 
 test('without a usage figure from the provider the tokens are estimated from the text', async (t) => {
   const svc = await start(t, { tokensPerDay: 100, tokensPerMinute: 1_000_000 }, createFakeModel(['z'.repeat(800)]));
 
-  await say(svc, 'hello', 'user-a');
+  await say(svc, 'Can you explain this?', 'user-a');
 
-  assert.equal(busyOf((await say(svc, 'hello', 'user-b')).events)?.limit, 'daily_token_budget');
+  assert.equal(busyOf((await say(svc, 'Can you explain this?', 'user-b')).events)?.limit, 'daily_token_budget');
 });
 
 test('the daily token budget defaults to 200,000 and can be set from the environment', async () => {

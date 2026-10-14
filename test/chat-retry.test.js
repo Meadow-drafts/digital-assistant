@@ -55,7 +55,7 @@ test('a retry while the first attempt is still running gets the whole reply, onc
 test('a new messageId is a new turn', async (t) => {
   const svc = await startService({ model: createFakeModel(['one', 'two']) });
   t.after(svc.close);
-  const base = { message: 'Hello', tenant: 'demo' };
+  const base = { message: 'Can you explain this?', tenant: 'demo' };
   await chatTurn(svc.baseUrl, { ...base, messageId: 'msg-0004-dddd' });
   const second = await chatTurn(svc.baseUrl, { ...base, messageId: 'msg-0005-eeee' });
 
@@ -66,7 +66,7 @@ test('a new messageId is a new turn', async (t) => {
 test('a turn that ended in an error is not replayed: trying again asks the model again', async (t) => {
   const svc = await startService({ model: createFakeModel([new Error('down'), 'fine']) });
   t.after(svc.close);
-  const body = { message: 'Hello', tenant: 'demo', messageId: 'msg-0006-ffff' };
+  const body = { message: 'Can you explain this?', tenant: 'demo', messageId: 'msg-0006-ffff' };
 
   const failed = await chatTurn(svc.baseUrl, body);
   assert.ok(failed.events.some((e) => e.type === 'error'));
@@ -78,7 +78,7 @@ test('a turn that ended in an error is not replayed: trying again asks the model
 test('another customer cannot replay a message id', async (t) => {
   const svc = await startService({ model: createFakeModel(['mine', 'theirs']) });
   t.after(svc.close);
-  const body = { message: 'Hello', tenant: 'demo', messageId: 'msg-0007-gggg' };
+  const body = { message: 'Can you explain this?', tenant: 'demo', messageId: 'msg-0007-gggg' };
 
   await chatTurn(svc.baseUrl, body, { token: makeToken('alice') });
   const other = await chatTurn(svc.baseUrl, body, { token: makeToken('bob') });
@@ -89,7 +89,7 @@ test('another customer cannot replay a message id', async (t) => {
 test('the thinking event carries the conversation id so a dropped reply can be resumed', async (t) => {
   const svc = await startService();
   t.after(svc.close);
-  const { events } = await chatTurn(svc.baseUrl, { message: 'Hi', tenant: 'demo' });
+  const { events } = await chatTurn(svc.baseUrl, { message: 'Can you explain this?', tenant: 'demo' });
 
   assert.equal(events[0].type, 'thinking');
   assert.equal(events[0].conversationId, events.at(-1).conversationId);

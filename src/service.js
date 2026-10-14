@@ -21,6 +21,7 @@ import { createAuditTrail, createFailedQuestionTrail } from './audit.js';
 import { createRetention } from './retention.js';
 import { asksAboutCurrentPage, verifiedPageContext } from './page-context.js';
 import { commonVerifiedStep } from './guides.js';
+import { socialKind, socialReply } from './social.js';
 
 const PUBLIC = new URL('../public/', import.meta.url);
 // Only these files are served; no user-controlled path ever reaches the disk.
@@ -347,8 +348,41 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     if (turnKey) recordTurn(turnKey, res);
     conversation.lastActiveAt = clock.now();
     const language = detectLanguage(body.message, conversation.language);
-    // With a human agent the bot is muted: the message goes to the agent, nothing is sent to the model.
     const withAgent = known ? handoff.agentCaseFor(body.conversationId) : null;
+    const social = !shielded.flagged ? socialKind(message) : null;
+    if (social) {
+      if (!withAgent) {
+        const limit = limiter.admit(pseudonym(req), body.message.length);
+        if (limit) {
+          await endBusy(req, res, { limit, conversationId, language, tenant: body.tenant });
+          return;
+        }
+      }
+      const text = socialReply(social, language);
+      conversation.language = language;
+      conversation.history.push({ role: 'user', content: message }, { role: 'assistant', content: text });
+      conversations.set(conversationId, conversation);
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+      send(res, 'thinking', { conversationId });
+      send(res, 'delta', { text });
+      send(res, 'done', { conversationId, language, model: null, offline: false });
+      await audit.append({
+        time: new Date(clock.now()).toISOString(),
+        user: pseudonym(req),
+        tenant: body.tenant ?? null,
+        conversationId,
+        userText: message,
+        replyText: text,
+        language,
+        guideIds: [],
+        model: null,
+        latencyMs: 0,
+        outcome: 'social',
+      });
+      res.end();
+      return;
+    }
+    // With a human agent, non-social messages go to the agent and nothing is sent to the model.
     if (withAgent) {
       if (message.length > 1000) { res.writeHead(400).end(); return; }
       await handoff.relayToAgent(withAgent, message);
