@@ -1,14 +1,14 @@
 # Core coverage: spec stories 1-98 against the tests
 
-Written for ticket 36 on 2026-10-13. Suite at the time: `npm test` gave 475 pass, 0 fail (run four times, same result). Tests only use the fakes in `test/harness/` (fake model, fake gateway, fake mailer, controllable clock). No real model and no test server were called.
+Originally written for ticket 36 on 2026-10-13. Updated 2026-10-14 against the current tests and eval artifacts. The latest `npm test` run gave 800 pass and 5 fail; all failures are in the ticket-50 widget resilience tests; that feature is outside the core dependency set, but the failures still block the suite required by ticket 36. Tests use fake models, fake gateway, fake mailer, fake clocks, local fixtures and ephemeral localhost service/provider endpoints. No real model or bank test server is called by the automated suite.
 
-How to read the "Proof" column. The names are test files in `test/`, with a fragment of the test title.
+How to read the "Proof" column. The names are test files in `test/`, with a fragment of the test title. Owner-run browser checks are recorded separately in the ticket-36 issue and README portal checklist.
 
 - **Proven**: a test asserts the behaviour at the service API or in the widget (jsdom).
-- **Proven (wiring)**: the fixed parts are asserted exactly, but what the *real model* writes (steps, language, tags, tone) can only be judged by the EN/FR eval run, which is ticket 34 and is **not done**. A fake model proves the service does the right thing with a well-behaved or a fooled model, not that Qwen behaves.
+- **Proven (wiring)**: the fixed parts are asserted exactly; what the *real model* writes (steps, language, tags, tone) is checked by the EN/FR eval. Ticket 34 is done and artifacts exist, but the recorded runs have errored items and are incomplete. A fake model proves the service does the right thing with a well-behaved or fooled model, not that Qwen behaves.
 - **Gap**: no proving test, or the test proves less than the story. Each gap has a ticket.
 
-Stories 95 and 96 (scoreboard, scripted replay) belong to the later phases (tickets 40 and 39) and are not counted as core. Story 94 is core but its ticket (34) is open.
+Stories 95 and 96 (scoreboard, scripted replay) belong to the later phases (tickets 40 and 39) and are not counted as core. Story 94 is core; ticket 34 is done, with partial real-model results recorded.
 
 ## How-to help (T0)
 
@@ -19,16 +19,16 @@ Stories 95 and 96 (scoreboard, scripted replay) belong to the later phases (tick
 | 3, 4 | chat: "language follows the latest message"; model: offline fallback is English only and says so | Proven (wiring) |
 | 5 | chat: "language follows the latest message, switching mid-chat"; widget: "disclaimer switches language with the latest message" | Proven |
 | 6 | chat: "misspelled or accent-free French is still detected as French" (language only; understanding typos is eval) | Proven (wiring) |
-| 7 | howto: "features the portal does not offer are answered from the unsupported list". There is **no `cards` guide**, international transfer and beneficiaries are answered "not available", and no test checks the story's task list | **Gap, ticket 52** |
+| 7 | `guides.test.js`: story 7 task list is explicitly checked against EN/FR guide pairs or `UNSUPPORTED.md`; `eval/items.js` includes Cards and lost-card items. Ticket 52 is done. | Proven (wiring); real-model response evidence is partial. |
 | 8 | howto: "a how-to answer reports the guide used and ends with when to talk to a human" | Proven |
 | 9 | howto: same test; widget: "the answer shows a 'what I used' chip naming the guide, in the reply language" | Proven |
 | 10 | howto: "a question no guide covers gets the no-verified-steps reply and a failed-question entry" | Proven |
-| 11 | Only a line in `src/prompts.js` ("General information:"). No test; by the spec's own rule (no assertions on prompts) only the eval can show it | Gap, covered by ticket 34 |
+| 11 | The prompt labels general information, but `eval/items.js` has no item asserting that general concepts are marked as such. Ticket 34 is implemented; this specific behavior remains unverified. | **Gap: add an EN/FR eval item** |
 | 12 | howto: "only that guide"; guide ids the model invents are dropped (a hallucinated fee is eval) | Proven (wiring) |
 | 13 | howto: "guides blocked by package, role or secondary connect are neither offered nor usable"; navigate: "a page the customer package excludes is dropped" | Proven |
 | 14 | howto (same); navigate: "a primary-connect-only page is never offered to a secondary connect"; t1-reads: "a secondary connect sees only its own wallet" | Proven |
 | 15 | widget: "a sent message shows a thinking state, then the streamed reply" | Proven |
-| 16 | No test: opening hours only touch human paging, the chat path ignores them | **Gap, ticket 61** (true by construction) |
+| 16 | `human-chip.test.js`: chat replies and shows the human chip at 03:00 and Sunday; handoff queues after hours. Ticket 61 is done. | Proven |
 | 17 | widget: "disclaimer is visible on load, outside the transcript, and states the PIN/OTP rule" | Proven |
 
 ## Reading my own data (T1)
@@ -39,7 +39,7 @@ Stories 95 and 96 (scoreboard, scripted replay) belong to the later phases (tick
 | 19 | balance: "the PIN box fallback... no PIN or hash reaches the model, UI, audit or logs"; widget-balance: "PIN box opens outside the transcript" | Proven |
 | 20 | balance: "the unlock lasts 5 minutes and then re-prompts"; "ends early when the session expires" | Proven |
 | 21 | t1-reads: "last transactions"; intents: transaction phrasings | Proven |
-| 22 | t1-reads: "transfer status by reference: only the customer's own transfer is shown". Live, the by-reference endpoint polls longer than the gateway timeout (ticket 25 note); the fake gateway answers at once | **Gap, ticket 53** |
+| 22 | `t1-reads.test.js`: wallet-scoped history lookup, unknown/other-user equivalence, HIST gating and timeout behavior; ticket 53 records a successful owner rerun against the test server on 2026-10-13. | Proven by fake tests and recorded live check |
 | 23 | t1-reads: "fees and limits are read with a read-only lookup and labelled as the bank's limits" | Proven |
 | 24 | t1-reads: "masked identifiers but real amounts..."; "counterparty known only by phone number is shown as a masked phone"; audit: masked text | Proven |
 | 25 | t1-reads: same first test (real amounts, dates, statuses, references) | Proven |
@@ -54,7 +54,7 @@ Stories 95 and 96 (scoreboard, scripted replay) belong to the later phases (tick
 | # | Proof | Status |
 |---|---|---|
 | 31 | explain-failure: "a failed transfer is explained from its status data and the failed-transfer guide" (only the plain "failed" case is model-worded; the rest is fixed text, asserted per outcome in EN and FR) | Proven (wiring) |
-| 32 | explain-failure: "ends with exactly one next step". The `history` step is not package-gated and the widget does not render `next_step` | Proven, with **gap, ticket 56** |
+| 32 | `explain-failure.test.js` and `widget-next-step.test.js`: exactly one step; History card is entitlement-validated and rendered, otherwise a human step. Ticket 56 is done. | Proven |
 | 33 | explain-failure: per-outcome loop "chip prominent / calm" | Proven |
 
 ## Navigate and pre-fill (T2)
@@ -123,7 +123,7 @@ Stories 95 and 96 (scoreboard, scripted replay) belong to the later phases (tick
 | 78 | refusals: "each refusal gets its fixed next-step card and is audited with its category"; widget: "a refusal shows the fixed next-step card" | Proven |
 | 79 | refusals: `off_topic` card (covers financial and legal advice by category; the model's tagging is eval) | Proven (wiring) |
 | 80 | injection (four tests); explain-failure: "the backend message is untrusted data"; output-filter. A fooled model is simulated; a real model's resistance is eval | Proven (wiring) |
-| 81 | rate-limits: per minute, daily cap, length, tool calls, token budget, daily request budget, busy message with chip. No *daily token* budget exists | Proven, with **gap, ticket 59** |
+| 81 | `rate-limits.test.js`: per-minute and rolling daily token/request limits, message length and tool-call limits, busy message and chip. Ticket 59 is done. | Proven |
 | 82 | chat: "every turn writes one audit record"; audit: "every record carries time, a pseudonymous user, the tenant and the conversation id"; file audit appends only | Proven |
 | 83 | audit: turn fields, action-card outcome, handoff state changes, cancelled reason; secret-scan | Proven |
 | 84 | retention: one value in one file; env override; audit, transcripts, closed cases, failed questions follow it | Proven |
@@ -141,19 +141,19 @@ Stories 95 and 96 (scoreboard, scripted replay) belong to the later phases (tick
 | 91 | All widget tests run on the demo host page (`public/index.html`) | Proven |
 | 92 | guides: "every shipped guide exists in both English and French"; "a guide present in one language only fails the check and refuses to load"; `npm run check:guides` passes | Proven |
 | 93 | howto: failed-question entry; retention: failed-question log follows retention | Proven |
-| 94 | Needs ticket 34 (EN/FR eval harness against the service): **not built**. Only the old scratch harness (`.scratch/banking-assistant/harness/run.mjs`) and its results exist | **Gap, ticket 34 (open)** |
+| 94 | Ticket 34 is done: `eval/` runs the real service through configured adapters and records per-language results. Qwen has partial EN/FR results with errors; Gemini artifacts contain only errored items. | Partly proven; full item coverage remains incomplete |
 | 95, 96 | Later phase (tickets 40, 39) | Not core |
 | 97 | navigate and howto package tests; prefill: "pages and forms the customer package, role or session do not allow are dropped". Package data is client-supplied in the demo (hand-over item, ticket 35) | Proven (demo trust model) |
 | 98 | production-gate: each prerequisite missing in turn, several at once, demo with none, the real entry point | Proven |
 
 ## Summary
 
-96 core stories (1-94, 97, 98), counted from the tables above:
+96 core stories (1-94, 97, 98), counted from the tables above and updated 2026-10-14:
 
-- **72 proven** by a test (a few carry a note, see the tables).
-- **11 proven (wiring)**: 1, 2, 3, 4, 6, 12, 27, 31, 77, 79, 80. Real-model behaviour waits for ticket 34.
-- **3 proven in jsdom or in part only**: 37, 38 (real browser, ticket 57 and the portal checklist) and 86 (live test server run is the owner's).
-- **5 proven, with a ticketed limit**: 32 (ticket 56), 35 and 40 (ticket 58), 59 (ticket 55, owner decision), 81 (ticket 59).
-- **5 gaps**: 7 (ticket 52), 11 (ticket 34), 16 (ticket 61), 22 (ticket 53), 94 (ticket 34, open).
+- **76 proven** at the service or widget layer.
+- **12 proven (wiring)**: 1, 2, 3, 4, 6, 7, 12, 27, 31, 77, 79, 80. Real-model behavior is only partly represented in the recorded evals.
+- **4 proven in jsdom or in part only**: 37, 38 (real browser, ticket 57 and the portal checklist), 86 (owner's live test-server run), and 94 (partial EN/FR artifacts).
+- **3 proven, with a remaining limit**: 35 and 40 (ticket 58, non-blocking), and 59 (owner decision in ticket 55).
+- **1 gap**: 11, general-concept answers are not asserted in the EN/FR eval set.
 
-Two of the five gaps (11 and 94) are the same thing: the EN/FR eval harness (ticket 34) is not built, so no number exists yet for how the real model behaves through the service.
+Ticket 34 and gaps 52-56 are implemented/done. The demo gate remains blocked by the five failing ticket-50 widget-resilience tests (not a core dependency, but still a required suite failure) and the owner-run portal checklist, whose items are still unchecked. The existing ticket-36 demo run sheet records owner-reported PASS for steps 0-12 in both languages; keep that evidence distinct from the unchecked portal checklist.

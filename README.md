@@ -13,7 +13,7 @@ Standalone assistant service and chat widget for the bank's portal. Spec and tic
 
 ```sh
 npm install
-npm test               # whole automated suite (service API, widget and console in jsdom): 747 pass, 0 fail
+npm test               # automated suite uses local fakes; latest ticket-36 run: 800 pass, 5 fail in ticket-50 widget-resilience tests
 npm run check:guides   # fails if a guide exists in one language only
 npm start              # needs Node 22.13 or later (built-in SQLite). Service on http://localhost:3000, demo host page on /, agent console on /console
 ```
@@ -122,9 +122,9 @@ These came out of running it against the real model, the bank's test server and 
 - **Sessions.** The portal wrapper reads `cli`, `usePackages`, `pack` and `typecli` from `localStorage.user`. Without a session, a clear "I could not connect to your account" message replaces guesses. A rejected balance flag is audited with a shape-only reason (`not_verified`, `no_tel`, `tel_mismatch`).
 - **Cross-origin.** `ALLOWED_ORIGINS` lets the portal on another port call the service.
 
-## Seen working live (from the owner's session audit, 2026-10-13)
+## Seen working live (owner's session audit, 2026-10-13)
 
-Session start with the portal's token and cli; balance by the portal PIN flag and by the widget's PIN box; last transactions table; explain-my-failure; page link cards (history, account history); PIN shield; a drafted case message through handoff, claim and resolve. Not yet confirmed live: scam warnings, cancel, the task links after the latest change, secondary connect, package gating, French page names, session expiry inside the portal.
+Session start with the portal's token and cli; balance by the portal PIN flag and by the widget's PIN box; last transactions table; explain-my-failure; page link cards (history, account history); PIN shield; a drafted case message through handoff, claim and resolve. The ticket-36 run sheet separately records the owner marking demo steps 0–12 PASS in EN and FR on 2026-10-13, but the inconsistencies were not itemized. The manual portal checklist below remains unchecked, so those separate checks are not treated as verified.
 
 ## Portal checklist (manual)
 
@@ -140,8 +140,10 @@ These need the real portal; jsdom tests do not prove them.
 - [ ] **Session expiry.** Let the token expire: the assistant says the session expired and does not retry.
 - [ ] **Secondary connect.** Only the own wallet is read, history is said to be for the primary connect, primary-only pages are not offered.
 
-## Open items
+## Ticket-36 verification state (2026-10-14)
 
-- The EN/FR eval harness (ticket 34) is built, but no real-model run has been made yet: there is no measured score until `npm run eval` is run with a key.
-- Gap tickets 52-61 in the scratch folder: 53 (transfer status by reference times out on the test server) and 56 (explain-failure History step ignores the package) are still open.
-- Hand-over items are listed in ticket 35: proof of the compliance agreement, a production model, a scoped token, a backend that binds ids to the token, a server-side balance PIN, backend logging fixes, SSO for agents, a durable case store, a real SMTP account. Production mode (`ASSISTANT_MODE=production`) refuses to start until the prerequisites are met.
+Ticket 34 and gap tickets 52–56 are marked done, with implementation, tests or recorded verification evidence for their requirements. The old claims that ticket 34 was unbuilt and that 53/56 were open are stale. Real-model artifacts exist: Qwen scored 30/44 EN items (68%; 25 errored) and 35/48 FR items (73%; 21 errored). Gemini has only three errored items per language. These are recorded, partial runs; the eval was not run as part of the automated suite.
+
+`npm run check:guides` passes. The latest full `npm test` run used fakes and local fixtures: 800 passed, 5 failed, all in `test/widget-resilience.test.js` (ticket 50); although that feature is outside the core dependency set, its failures still block the suite required by ticket 36. The README portal checklist remains unchecked and ticket 36 stays blocked pending the exact owner-run checks recorded in `.scratch/banking-assistant/issues/36-core-complete-end-to-end-demo-verification.md`.
+
+Hand-over items are listed in ticket 35: proof of the compliance agreement, a production model, a scoped token, a backend that binds ids to the token, a server-side balance PIN, backend logging fixes, SSO for agents, a durable case store, a real SMTP account. Production mode (`ASSISTANT_MODE=production`) refuses to start until the prerequisites are met.
