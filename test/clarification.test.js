@@ -22,7 +22,7 @@ test('a materially ambiguous request asks one localized question without answeri
   assert.deepEqual(clarification, {
     type: 'clarification',
     question: 'What would you like help with?',
-    options: ['Send a single transfer', 'Send an outgoing remittance (money to someone who may not have an account)'],
+    options: ['Send a single transfer', 'Send money outside the CEMAC zone (outgoing remittance)'],
   });
   assert.equal(event(events, 'delta'), undefined);
   assert.equal(event(events, 'action_card'), undefined);
@@ -163,7 +163,7 @@ test('the clarification question and offered guide titles follow the customer’
 
   assert.equal(event(events, 'done').language, 'fr');
   assert.equal(clarification.question, 'Vous cherchez des informations sur quel sujet ?');
-  assert.deepEqual(clarification.options, ['Effectuer un transfert unique', 'Effectuer un envoi sortant (remittance)']);
+  assert.deepEqual(clarification.options, ['Effectuer un transfert unique', "Envoyer de l'argent hors de la zone CEMAC (remittance sortante)"]);
 });
 
 test('a clear request continues directly without an unnecessary clarification', async (t) => {
@@ -209,7 +209,7 @@ test('a vague send-money request clarifies when both transfer guides are eligibl
 
   assert.deepEqual(event(events, 'clarification')?.options, [
     'Send a single transfer',
-    'Send an outgoing remittance (money to someone who may not have an account)',
+    'Send money outside the CEMAC zone (outgoing remittance)',
   ]);
   assert.equal(event(events, 'action_card'), undefined);
   assert.equal(model.calls.filter((call) => call.purpose === 'answer').length, 0);
@@ -233,7 +233,7 @@ test('the widget presents plain-language choices and sends the selected choice b
   await widget.until(() => widget.qa('clarification-option').length === 2);
   assert.deepEqual(widget.qa('clarification-option').map((button) => button.textContent), [
     'Send a single transfer',
-    'Send an outgoing remittance (money to someone who may not have an account)',
+    'Send money outside the CEMAC zone (outgoing remittance)',
   ]);
   assert.doesNotMatch(widget.q('messages').textContent, /transfer-single|transfer-remittance/);
 
@@ -241,5 +241,5 @@ test('the widget presents plain-language choices and sends the selected choice b
   await widget.until(() => widget.q('guides-used')?.textContent.includes('outgoing remittance'));
 
   assert.equal(widget.net.requests.length, 2);
-  assert.equal(widget.net.requests[1].message, 'Send an outgoing remittance (money to someone who may not have an account)');
+  assert.equal(widget.net.requests[1].message, 'Send money outside the CEMAC zone (outgoing remittance)');
 });

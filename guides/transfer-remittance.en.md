@@ -5,10 +5,10 @@ route: /transfer (Outgoing Remittance tab)
 package: OARE, OWRE, OCRE, OVRE (any one)
 verified-on: DRAFT 2026-10-12, code read only, owner to validate
 ---
-# Send an outgoing remittance (money to someone who may not have an account)
+# Send money outside the CEMAC zone (outgoing remittance)
 
 ## When to use
-You want to send money to a person identified by account, wallet, card or voucher, with their identity details. This is also how to send money to another country, including elsewhere in the CEMAC region.
+Use this for sending money to someone in a country outside the CEMAC zone. The recipient can be identified by account, wallet, card or voucher, with their identity details.
 
 ## Steps
 1. Open **Transfers**, tab **Outgoing Remittance**.

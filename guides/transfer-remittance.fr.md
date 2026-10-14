@@ -5,10 +5,10 @@ route: /transfer (Outgoing Remittance tab)
 package: OARE, OWRE, OCRE, OVRE (any one)
 verified-on: DRAFT 2026-10-12, code read only, owner to validate
 ---
-# Effectuer un envoi sortant (remittance)
+# Envoyer de l'argent hors de la zone CEMAC (remittance sortante)
 
 ## Quand l'utiliser
-Vous voulez envoyer de l'argent à une personne identifiée par compte, wallet, carte ou voucher, avec ses informations d'identité. C'est aussi ainsi que l'on envoie de l'argent vers un autre pays, y compris ailleurs dans la zone CEMAC.
+Utilisez cette option pour envoyer de l'argent à une personne située dans un pays hors de la zone CEMAC. Le destinataire peut être identifié par compte, wallet, carte ou voucher, avec ses informations d'identité.
 
 ## Étapes
 1. Ouvrez **Transfert**, onglet **Remittance sortante**.
