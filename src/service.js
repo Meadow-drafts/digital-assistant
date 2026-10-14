@@ -19,6 +19,7 @@ import { createConversationStore } from './conversations.js';
 import { createDrafts } from './draft.js';
 import { createAuditTrail, createFailedQuestionTrail } from './audit.js';
 import { createRetention } from './retention.js';
+import { asksAboutCurrentPage, verifiedPageContext } from './page-context.js';
 
 const PUBLIC = new URL('../public/', import.meta.url);
 // Only these files are served; no user-controlled path ever reaches the disk.
@@ -66,7 +67,7 @@ async function collect(stream) {
 
 // Router mode: the model sees a short index of the guides this customer may
 // use and returns the ids it needs. Anything not in the index is dropped.
-async function routeGuides({ model, language, available, guides, history, tools, retry = false }) {
+async function routeGuides({ model, language, available, guides, history, tools, retry = false, page = null }) {
   const index = available.map((g) => ({ id: g.id, title: g[language].title }));
   // The title names each unavailable feature (the bold lead of every bullet in UNSUPPORTED.md), so the model can
   // match "add a beneficiary" or "block my card" to it instead of to the nearest real guide.
@@ -74,7 +75,7 @@ async function routeGuides({ model, language, available, guides, history, tools,
     const topics = [...guides.unsupported.matchAll(/^- \*\*(.+?)\.\*\*/gm)].map((m) => m[1]);
     index.push({ id: UNSUPPORTED_ID, title: `Things the portal does not offer: ${topics.join('; ')}` });
   }
-  const raw = await collect(model.chat({ purpose: 'route', messages: routerMessages(index, history, { tools, retry }), language }));
+  const raw = await collect(model.chat({ purpose: 'route', messages: routerMessages(index, history, { tools, retry, page }), language }));
   const routed = parseRefusal(raw);
   // The model's own tool tag (with its arguments) wins. A plain own-data question (balance, recent transactions,
   // fees and limits) is otherwise decided by rules, even over a model refusal: the model has seen earlier replies
@@ -84,6 +85,10 @@ async function routeGuides({ model, language, available, guides, history, tools,
   const tool = modelTool ?? intentTool(history.at(-1)?.content);
   if (tool) return { picks: [], refusal: null, tool, toolSource: modelTool ? 'model' : 'rules' };
   if (routed.category) return { picks: [], refusal: routed.category };
+  if (page && asksAboutCurrentPage(history.at(-1)?.content)) {
+    const candidates = page.guides.map((guide) => guide.id);
+    if (candidates.length === 1) return { picks: candidates, refusal: null };
+  }
   // Features the portal does not offer are decided by rules too: the model kept picking the nearest real guide.
   if (guides.unsupported && asksForUnavailable(history.at(-1)?.content)) return { picks: [UNSUPPORTED_ID], refusal: null };
   let picks = [];
@@ -477,11 +482,12 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
       if (guides) {
         const ent = await entitlementsFor(req, body.tenant, conversation);
         const available = guides.availableFor(ent);
-        let routed = await routeGuides({ model: turnModel, language, available, guides, history, tools: t1 ? TOOL_RULES : '' });
+        const page = verifiedPageContext(body.pageContext, { navigation, availableGuides: available, language, now: clock.now() });
+        let routed = await routeGuides({ model: turnModel, language, available, guides, history, tools: t1 ? TOOL_RULES : '', page });
         // "I want to send money" is a how-to question, not a request to execute. If the router refused it as execute and
         // the customer did not ask the assistant to complete or approve anything, ask once more with a reminder.
         if (routed.refusal === 'execute' && !asksToComplete(message)) {
-          routed = await routeGuides({ model: turnModel, language, available, guides, history, tools: t1 ? TOOL_RULES : '', retry: true });
+          routed = await routeGuides({ model: turnModel, language, available, guides, history, tools: t1 ? TOOL_RULES : '', retry: true, page });
         }
         const { picks } = routed;
         refusal = routed.refusal;
@@ -523,7 +529,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
             const material = picks.map((id) => guides.get(id)?.[language] ?? null).filter(Boolean);
             // An answer from the unsupported list has no task page: the model is offered no links and none can be drawn.
             const linkable = navigation && used.length > 0;
-            await answer(answerMessages(material, picks.includes(UNSUPPORTED_ID) ? guides.unsupported : '', history, linkable ? offeredPages(navigation, language, ent) : []), {
+            await answer(answerMessages(material, picks.includes(UNSUPPORTED_ID) ? guides.unsupported : '', history, linkable ? offeredPages(navigation, language, ent) : [], page), {
               navigate: linkable ? { fallback: stepsOf(material[0]?.text ?? ''), entitlements: ent, guided: used.length > 0, guideRoutes: used.map((g) => g.route).filter(Boolean) } : null,
             });
             const closing = used.find((g) => g[language].closing)?.[language].closing;
