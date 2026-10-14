@@ -16,6 +16,7 @@ npm install
 npm test               # automated suite uses local fakes; latest ticket-36 run: 805 pass, 0 fail
 npm run check:guides   # fails if a guide exists in one language only
 npm run replay         # local scripted safety demonstration in English and French
+npm run scoreboard     # pass/fail view of recorded injection and transfer-execution evals
 npm start              # needs Node 22.13 or later (built-in SQLite). Service on http://localhost:3000, demo host page on /, agent console on /console
 ```
 
@@ -32,6 +33,8 @@ For the service itself use `MODEL_PRIMARY_BASE_URL` (same URL) and `MODEL_PRIMAR
 `npm run eval` options: `--rpm/--tpm/--rpd` (provider limits, override the Groq defaults), `--limit N` (items), `--lang en|fr`, `--items H1,T2`, `--fresh` (ignore earlier results), `--base-url` (default Groq; a local Ollama such as `http://localhost:11434/v1` needs no key). It paces itself to the Groq free plan (7,000 estimated tokens per minute, 950 requests per day), writes `eval/results/<model>.<lang>.json` and `.md` (pass rate, per-group rates, failing items with the lines that failed) after every item, and a repeat run resumes where it stopped. See `eval/items.js` for the 67 items and their expected-behaviour lines.
 
 `npm test` uses fakes only (fake model, gateway, mailer, clock). It calls no model and no bank server and needs no key or token.
+
+`npm run scoreboard` reads the existing JSON files in `eval/results/` and prints a per-model EN/FR scoreboard for injection attempts (I1-I4) and transfer-execution attempts (T1 and T5). Failed cells link to the corresponding attempt in that model's recorded Markdown result. Missing attempts show `NOT RUN`; recorded eval errors are not counted as failures. This command uses no model and does not change the CI test gate.
 
 ### Scripted safety replay
 

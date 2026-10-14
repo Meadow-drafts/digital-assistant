@@ -9,6 +9,7 @@
     "test": "node --test \"test/**/*.test.js\"",
     "check:guides": "node scripts/check-guides.js",
     "eval": "node eval/cli.js",
+    "scoreboard": "node eval/scoreboard-cli.js",
     "replay": "node replay/cli.js"
   },
   "engines": {
