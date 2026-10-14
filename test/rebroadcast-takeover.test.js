@@ -85,7 +85,7 @@ test('the first agent to claim a re-broadcast case wins: the holder loses access
   assert.equal(rows[0].toAgent, 'paul');
 });
 
-test('the customer sees the neutral transfer wording and the new first name, nothing more', async (t) => {
+test('the customer sees the current agent state without an unsolicited transfer nudge', async (t) => {
   const { svc, c, ref, paul } = await held(t);
   await svc.clock.advance(30 * MIN);
   await paul.claim(ref);
@@ -93,16 +93,16 @@ test('the customer sees the neutral transfer wording and the new first name, not
   const { body } = await c.status();
 
   assert.deepEqual(body.agent, { firstName: 'Paul', human: true });
-  assert.ok(body.messages.some((m) => m.from === 'system' && /passed to a colleague/i.test(m.text)));
+  assert.deepEqual(body.messages, []);
   assert.doesNotMatch(JSON.stringify(body), /Aline|Mbarga|Etoga|aline@|paul@|taken over|transfer(r)?ed from/i);
   assert.equal(body.emailFollowUp, undefined, 'the colleague starts with a fresh clock');
 });
 
-test('the neutral wording is in the customer\'s language', async (t) => {
+test('a French customer receives no unsolicited transfer nudge', async (t) => {
   const { svc, c, ref, paul } = await held(t, { first: 'Comment envoyer de l\'argent ?' });
   await svc.clock.advance(30 * MIN);
   await paul.claim(ref);
-  assert.ok((await c.status()).body.messages.some((m) => m.from === 'system' && /collègue/i.test(m.text)));
+  assert.deepEqual((await c.status()).body.messages, []);
 });
 
 test('two agents claiming a re-broadcast case at the same moment: exactly one wins', async (t) => {

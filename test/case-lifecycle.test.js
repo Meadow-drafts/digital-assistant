@@ -25,22 +25,22 @@ async function claimed(t, { over = {}, first } = {}) {
 }
 const notices = async (c) => (await c.status()).body.messages.filter((m) => m.from === 'system').map((m) => m.text);
 
-test('10 minutes of agent silence after the claim: the customer gets a soft "still working on it", not a second before', async (t) => {
+test('10 minutes of agent silence are recorded without sending a status nudge', async (t) => {
   const { svc, c } = await claimed(t);
 
   await svc.clock.advance(10 * MIN - SEC);
   assert.deepEqual(await notices(c), []);
   await svc.clock.advance(SEC);
 
-  const [soft] = await notices(c);
-  assert.match(soft, /still working on it/i);
+  assert.deepEqual(await notices(c), []);
+  assert.equal(svc.audit.records.filter((record) => record.outcome === 'case_still_working').length, 1);
   assert.equal((await c.status()).body.state, 'with_agent', 'the case stays with the agent');
 });
 
-test('the soft message is in the customer\'s language', async (t) => {
+test('silence does not send an unsolicited status message in French', async (t) => {
   const { svc, c } = await claimed(t, { first: 'Comment envoyer de l\'argent ?' });
   await svc.clock.advance(10 * MIN);
-  assert.match((await notices(c))[0], /nous y travaillons/i);
+  assert.deepEqual(await notices(c), []);
 });
 
 test('an agent reply stops the silence clock; the next customer message starts it again from that moment', async (t) => {
@@ -54,7 +54,7 @@ test('an agent reply stops the silence clock; the next customer message starts i
   await svc.clock.advance(10 * MIN - SEC);
   assert.deepEqual(await notices(c), []);
   await svc.clock.advance(SEC);
-  assert.match((await notices(c))[0], /still working on it/i);
+  assert.deepEqual(await notices(c), []);
 });
 
 test('30 minutes of silence re-broadcasts to the pool with a link only, and offers email follow-up to the customer', async (t) => {
@@ -75,9 +75,8 @@ test('30 minutes of silence re-broadcasts to the pool with a link only, and offe
   }
   const { body } = await c.status();
   assert.equal(body.emailFollowUp, true);
-  const texts = await notices(c);
-  assert.equal(texts.length, 2, 'the soft message at 10 minutes, then the follow-up offer');
-  assert.match(texts[1], /email/i);
+  assert.deepEqual(await notices(c), [], 'the updated case view does not add unsolicited status messages');
+  assert.equal(svc.audit.records.filter((r) => r.outcome === 'case_still_working' && r.caseRef === ref).length, 1);
   assert.equal(svc.audit.records.filter((r) => r.outcome === 'case_rebroadcast' && r.caseRef === ref).length, 2, 'one audit row per page, like the 5 minute broadcast');
 });
 
@@ -97,9 +96,11 @@ test('the lifecycle timers are configuration, not hardcoded', async (t) => {
   const { svc, c } = await claimed(t, { over: { support: { ...support, timers: { ...support.timers, agentSilenceMs: 2 * MIN, agentFollowUpMs: 3 * MIN } } } });
 
   await svc.clock.advance(2 * MIN);
-  assert.equal((await notices(c)).length, 1, 'fires at the configured 2 minutes');
+  assert.deepEqual(await notices(c), [], 'the configured timer records progress without a customer nudge');
+  assert.equal(svc.audit.records.filter((r) => r.outcome === 'case_still_working').length, 1);
   await svc.clock.advance(MIN);
-  assert.equal((await notices(c)).length, 2, 'and the follow-up at the configured 3');
+  assert.deepEqual(await notices(c), [], 'the follow-up timer also adds no customer nudge');
+  assert.equal(svc.audit.records.filter((r) => r.outcome === 'case_rebroadcast').length, 2);
 });
 
 test('the shipped config holds the ticket 07 placeholders, and a missing or inconsistent lifecycle timer fails loudly at load', async () => {
@@ -278,7 +279,7 @@ test('"No" 72 hours minus one second after resolution reopens the same case, wit
   await svc.clock.advance(10 * MIN - SEC);
   assert.equal((await notices(c)).length, before);
   await svc.clock.advance(SEC);
-  assert.match((await notices(c)).at(-1), /still working on it/i);
+  assert.deepEqual(await notices(c), []);
 });
 
 test('"No" exactly 72 hours after resolution still reopens the same case (the boundary is the chip\'s)', async (t) => {
@@ -361,24 +362,23 @@ test('an agent transfers a case to a colleague: the colleague gets the whole cas
   assert.equal(svc.audit.records.filter((r) => r.outcome === 'case_transferred' && r.caseRef === ref).length, 1);
 });
 
-test('the customer sees the transfer in neutral wording and then the colleague\'s first name, nothing more', async (t) => {
+test('a case transfer updates the explicit status view without an unsolicited message', async (t) => {
   const { svc, c, ref, aline } = await claimed(t);
   await aline.transfer(ref, 'paul');
 
   const { body } = await c.status();
 
   assert.deepEqual(body.agent, { firstName: 'Paul', human: true });
-  const [notice] = body.messages.filter((m) => m.from === 'system');
-  assert.match(notice.text, /colleague/i);
+  assert.deepEqual(body.messages, []);
   assert.doesNotMatch(JSON.stringify(body), /Aline|Mbarga|Etoga|aline@|paul@|transfer(r)?ed from/i);
   assert.equal(body.messages.some((m) => m.from === 'agent'), false);
   assert.equal(svc.audit.records.filter((r) => r.outcome === 'case_transferred').length, 1);
 });
 
-test('the transfer notice is in the customer\'s language', async (t) => {
+test('a French case transfer does not send an unsolicited status message', async (t) => {
   const { c, ref, aline } = await claimed(t, { first: 'Comment envoyer de l\'argent ?' });
   await aline.transfer(ref, 'paul');
-  assert.match((await notices(c))[0], /collègue/i);
+  assert.deepEqual(await notices(c), []);
 });
 
 test('the colleague is paged by email with a link and the conversation id only', async (t) => {
@@ -428,7 +428,7 @@ test('a transfer gives the colleague a fresh silence clock and a fresh 24 hours'
   await svc.clock.advance(MIN);
   assert.deepEqual((await notices(c)).filter((x) => /still working/i.test(x)), [], 'the old agent\'s clock does not run on the colleague');
   await svc.clock.advance(9 * MIN);
-  assert.equal((await notices(c)).filter((x) => /still working/i.test(x)).length, 1);
+  assert.deepEqual(await notices(c), []);
 
   await svc.clock.advance(23 * HOUR + 40 * MIN);
   assert.equal((await c.status()).body.state, 'with_agent');

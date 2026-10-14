@@ -61,7 +61,7 @@ test('while waiting, assistant replies are labelled as automated replies', async
 
   assert.equal(w.qa('automated-label').length, 1);
   assert.match(w.q('automated-label').textContent, /automated reply/i);
-  assert.equal(w.q('automated-label').nextElementSibling.textContent, 'Open Transfers.');
+  assert.match(w.q('automated-label').nextElementSibling.textContent, /^Open Transfers\./);
 });
 
 test('once an agent claims, the banner shows the agent first name and a human agent badge, and the bot is muted', async (t) => {
@@ -196,7 +196,7 @@ test('after 15 minutes unclaimed the banner tells the customer the case is queue
   assert.ok(w.q('case-cancel'), 'the case is still open and can be cancelled');
 });
 
-test('the soft "still working on it" and the transfer notice show as notes, not as agent messages', async (t) => {
+test('case state changes and timers do not send unsolicited status nudges', async (t) => {
   const svc = await startService({ model: createFakeModel(['Hi there.']) });
   t.after(svc.close);
   const w = await askForAgent(svc, t);
@@ -205,10 +205,15 @@ test('the soft "still working on it" and the transfer notice show as notes, not 
   await w.until(() => /with an agent/i.test(w.q('case-state').textContent));
 
   await svc.clock.advance(10 * 60_000);
-  await w.until(() => w.qa('case-note').some((n) => /still working on it/i.test(n.textContent)));
   await aline.transfer(refOf(w), 'paul');
-  await w.until(() => w.qa('case-note').some((n) => /colleague/i.test(n.textContent)));
+  await svc.clock.advance(30 * 60_000);
+  await w.until(() => w.q('case-agent-name').textContent === 'Paul');
+  const paul = await agentLogin(svc.baseUrl, 'paul');
+  await paul.resolve(refOf(w));
+  await w.until(() => w.q('case-banner').hidden);
 
   assert.equal(w.qa('message').filter((m) => m.dataset.from === 'agent').length, 0, 'no agent bubble was invented');
+  assert.deepEqual(w.qa('case-note'), [], 'claim, silence, transfer and resolution do not add status messages to chat');
+  assert.doesNotMatch(w.document.body.textContent, /still working on it|taking longer than expected|passed to a colleague|Case C-\d+ resolved/i);
   assert.doesNotMatch(w.document.body.textContent, /Aline Mbarga|Paul Etoga/);
 });

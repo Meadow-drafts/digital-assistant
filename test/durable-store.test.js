@@ -238,7 +238,7 @@ test('a timer that came due while the server was down fires as soon as it starts
   assert.equal((await status()).body.queued, true, 'queued notice at 15 minutes after the case opened');
 });
 
-test('with an agent: the 10 and 30 minute silence timers keep running across a restart, and the soft message is not repeated', async (t) => {
+test('with an agent: silence timers keep running across a restart without sending status nudges', async (t) => {
   const ctx = await world(t);
   const a = alice();
   const cust = await customerOn(ctx.svc, a);
@@ -252,12 +252,13 @@ test('with an agent: the 10 and 30 minute silence timers keep running across a r
   await svc.clock.advance(4 * MIN - SEC);
   assert.deepEqual(await notices(), []);
   await svc.clock.advance(SEC);
-  assert.match((await notices())[0], /still working on it/i, 'at 10 minutes after the claim');
+  assert.deepEqual(await notices(), [], 'no status nudge at 10 minutes after the claim');
+  assert.equal(svc.audit.records.filter((record) => record.outcome === 'case_still_working').length, 1);
 
-  svc = await ctx.restart(); // the soft message is already sent: it must not come again
+  svc = await ctx.restart(); // the silence event is already recorded; it must not send a customer nudge
   await resume(svc, a, cust);
   await svc.clock.advance(0);
-  assert.equal((await notices()).filter((n) => /still working on it/i.test(n)).length, 1);
+  assert.deepEqual(await notices(), [], 'restarting does not repeat or introduce a customer status nudge');
   svc.mailer.outbox.length = 0;
   await svc.clock.advance(20 * MIN - SEC);
   assert.deepEqual(pages(svc), []);
