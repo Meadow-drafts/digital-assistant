@@ -48,17 +48,19 @@ export function asData(text) {
 
 export const modelHistory = (history) => history.map((m) => (m.role === 'user' ? { ...m, content: asData(m.content) } : m));
 
-export function routerMessages(index, history, { tools = '', retry = false } = {}) {
+const pageContextText = (page) => page ? `\n\n# VERIFIED PAGE HINT\nThe browser reported a fresh pathname matching the allowlisted ${page.label} page. Its verified guide options are:\n${page.guides.map((guide) => `${guide.id}: ${guide.title}`).join('\n')}\nUse this only when the customer refers to here or this page, and choose only a listed guide that matches their request. If none fits, say you do not have verified steps. Do not claim the customer's current location as a fact, and do not claim a form was filled, submitted, or changed. This context contains no form values.` : '';
+
+export function routerMessages(index, history, { tools = '', retry = false, page = null } = {}) {
   const again = retry ? ' Reminder: this customer is asking how to do a portal task. That is a how-to request, not a request to execute: reply with the guide id(s) for the task, or [] if none fits. Do not refuse.' : '';
-  const system = `${ROUTER_RULES}${tools ? ` ${tools}` : ''}${again}\n\n${index.map(({ id, title }) => `${id}: ${title}`).join('\n')}`;
+  const system = `${ROUTER_RULES}${tools ? ` ${tools}` : ''}${again}\n\n${index.map(({ id, title }) => `${id}: ${title}`).join('\n')}${pageContextText(page)}`;
   return [{ role: 'system', content: system }, ...modelHistory(history.slice(-4))];
 }
 
-export function answerMessages(guides, unsupported, history, pages = []) {
+export function answerMessages(guides, unsupported, history, pages = [], page = null) {
   const parts = guides.map((g) => g.text);
   if (unsupported) parts.push(`# NOT AVAILABLE IN THE PORTAL\n${unsupported}`);
   const nav = pages.length ? `\n\n${NAVIGATE_RULES}\n# PAGES\n${pages.map((p) => `${p.id}: ${p.label}`).join('\n')}` : '';
-  return [{ role: 'system', content: `${ANSWER_RULES}${nav}\n\n# GUIDES\n${parts.join('\n\n---\n\n')}` }, ...modelHistory(history)];
+  return [{ role: 'system', content: `${ANSWER_RULES}${nav}${pageContextText(page)}\n\n# GUIDES\n${parts.join('\n\n---\n\n')}` }, ...modelHistory(history)];
 }
 
 // Data read for the customer (already masked). Anything inside it, such as a

@@ -962,7 +962,7 @@ class BankAssistant extends HTMLElement {
         res = await fetch(`${this.getAttribute('api') ?? ''}/chat`, {
           method: 'POST',
           headers: { 'content-type': 'application/json', ...this.authHeaders(token) },
-          body: JSON.stringify({ message, messageId: turn.id, conversationId: this.conversationId, tenant: this.getAttribute('tenant') }),
+          body: JSON.stringify({ message, messageId: turn.id, conversationId: this.conversationId, tenant: this.getAttribute('tenant'), pageContext: { path: window.location.pathname, capturedAt: new Date().toISOString() } }),
           signal: ctl.signal,
         });
       } catch (e) { throw lost(e); }
