@@ -46,6 +46,7 @@ function turnOf(events, { modelInput, ms, status: httpStatus }) {
     text: textOf(events),
     guides: (all(events, 'guides')[0]?.guides ?? []).map((g) => g.id),
     refusal: all(events, 'refusal')[0]?.category ?? null,
+    refusalCard: all(events, 'refusal')[0]?.card ?? null,
     chip: (({ prominent = false, reasons = [] } = {}) => ({ prominent, reasons }))(all(events, 'chip').at(-1)),
     cards: all(events, 'action_card').map(({ type, ...card }) => card),
     tool: all(events, 'tool')[0]?.name ?? null,
@@ -61,7 +62,7 @@ function turnOf(events, { modelInput, ms, status: httpStatus }) {
   };
 }
 
-export async function createRig({ model }) {
+export async function createRig({ model, clock, gateway, mailer }) {
   const { alice, carol } = wallets();
   const customers = [alice, carol];
   // Everything the model is sent during the current turn, kept so a line can assert what it never saw.
@@ -78,13 +79,14 @@ export async function createRig({ model }) {
   const navigation = loadNavigation(NAVIGATION);
   const svc = await startService({
     model: recording,
-    gateway: createFakeGateway(bankRoutes(customers)),
+    gateway: gateway ?? createFakeGateway(bankRoutes(customers)),
+    ...(mailer ? { mailer } : {}),
     guides: loadGuides(GUIDES),
     navigation,
     scamCues: loadScamCues(SCAM_CUES),
     outputAllowlist: { urlHosts: [], emails: [], phones: [] },
     limits: NO_LIMITS,
-    clock: { now: () => Date.now(), setTimeout: (f, ms) => setTimeout(f, ms), clearTimeout: (id) => clearTimeout(id) },
+    clock: clock ?? { now: () => Date.now(), setTimeout: (f, ms) => setTimeout(f, ms), clearTimeout: (id) => clearTimeout(id) },
   });
 
   async function open(c, { unlock }) {
