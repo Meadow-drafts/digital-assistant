@@ -123,18 +123,25 @@ function renderQueue(cases) {
     b.dataset.ref = c.ref;
     if (c.ref === selected) b.setAttribute('aria-current', 'true');
     if (c.waitLevel) b.dataset.level = c.waitLevel;
-    const ref = document.createElement('span'); ref.className = 'case-ref'; ref.textContent = c.ref;
-    const age = document.createElement('span'); age.className = 'case-age';
+    const head = document.createElement('span'); head.className = 'case-head';
+    const ref = document.createElement('b'); ref.className = 'case-ref'; ref.textContent = c.ref;
+    head.append(ref);
+    if (c.priority) {
+      const priority = document.createElement('span'); priority.className = 'pill priority'; priority.textContent = 'Priority'; head.append(priority);
+    }
+    const age = document.createElement('time'); age.className = 'case-age';
     const ageSeconds = Math.max(0, Math.floor((Date.now() - Date.parse(c.openedAt)) / 1000));
     age.textContent = Number.isFinite(ageSeconds) ? ageSeconds < 3600 ? `${Math.floor(ageSeconds / 60)} min ago` : ageSeconds < 86400 ? `${Math.floor(ageSeconds / 3600)} h ago` : `${Math.floor(ageSeconds / 86400)} d ago` : '';
+    head.append(age);
     const state = document.createElement('span'); state.className = `pill ${c.state === 'waiting' ? 'waiting' : c.state === 'with_agent' ? 'assigned' : ''}`; state.textContent = label(c);
     const summary = document.createElement('span'); summary.className = 'case-summary';
     summary.textContent = c.queueSummary
       ? `${c.queueSummarySource === 'assistant' ? 'AI summary · may be wrong' : 'Customer draft'}: ${c.queueSummary}`
       : c.priority ? 'Priority case · wrong transfer' : 'No case summary available';
     const wait = document.createElement('span'); wait.className = 'case-wait';
-    wait.textContent = c.waitingSeconds === null ? (c.priority ? 'Priority' : '') : `waiting ${clock(c.waitingSeconds)}${c.waitingFor === 'reply' ? ' for a reply' : ''}${SLOW[c.waitLevel] ?? ''}`;
-    b.append(ref, age, summary, state, wait);
+    wait.textContent = c.waitingSeconds === null ? '' : `waiting ${clock(c.waitingSeconds)}${c.waitingFor === 'reply' ? ' for a reply' : ''}${SLOW[c.waitLevel] ?? ''}`;
+    const footer = document.createElement('span'); footer.className = 'case-foot'; footer.append(state, wait);
+    b.append(head, summary, footer);
     b.addEventListener('click', () => { if (selected !== c.ref) clearSuggestions(); shownLines = ''; openCase(c.ref); refresh(); });
     return b;
   }));
