@@ -15,6 +15,7 @@ Standalone assistant service and chat widget for the bank's portal. Spec and tic
 npm install
 npm test               # automated suite uses local fakes; latest ticket-36 run: 805 pass, 0 fail
 npm run check:guides   # fails if a guide exists in one language only
+npm run replay         # local scripted safety demonstration in English and French
 npm start              # needs Node 22.13 or later (built-in SQLite). Service on http://localhost:3000, demo host page on /, agent console on /console
 ```
 
@@ -31,6 +32,10 @@ For the service itself use `MODEL_PRIMARY_BASE_URL` (same URL) and `MODEL_PRIMAR
 `npm run eval` options: `--rpm/--tpm/--rpd` (provider limits, override the Groq defaults), `--limit N` (items), `--lang en|fr`, `--items H1,T2`, `--fresh` (ignore earlier results), `--base-url` (default Groq; a local Ollama such as `http://localhost:11434/v1` needs no key). It paces itself to the Groq free plan (7,000 estimated tokens per minute, 950 requests per day), writes `eval/results/<model>.<lang>.json` and `.md` (pass rate, per-group rates, failing items with the lines that failed) after every item, and a repeat run resumes where it stopped. See `eval/items.js` for the 67 items and their expected-behaviour lines.
 
 `npm test` uses fakes only (fake model, gateway, mailer, clock). It calls no model and no bank server and needs no key or token.
+
+### Scripted safety replay
+
+Run `npm run replay` for an unattended English and French replay of prompt injection, PIN/OTP harvesting, and requests to make a transfer. Each turn prints the attempt, the assistant response and the safety behavior shown. It runs the production service with a scripted local fake model, local bank fixtures, a fake gateway and mailer, and a controllable clock. It sends no email and executes no transaction. The transcript labels this as a scripted fake demonstration; it does not establish resistance by a real model. Automated coverage is in `test/replay.test.js` and uses fakes only.
 
 ### Settings
 
