@@ -124,26 +124,26 @@ These came out of running it against the real model, the bank's test server and 
 
 ## Seen working live (owner's session audit, 2026-10-13)
 
-Session start with the portal's token and cli; balance by the portal PIN flag and by the widget's PIN box; last transactions table; explain-my-failure; page link cards (history, account history); PIN shield; a drafted case message through handoff, claim and resolve. The ticket-36 run sheet separately records the owner marking demo steps 0–12 PASS in EN and FR on 2026-10-13, but the inconsistencies were not itemized. The manual portal checklist below remains unchecked, so those separate checks are not treated as verified.
+Session start with the portal's token and cli; balance by the portal PIN flag and by the widget's PIN box; last transactions table; explain-my-failure; page link cards (history, account history); PIN shield; a drafted case message through handoff, claim and resolve. The ticket-36 run sheet records the owner marking demo steps 0–12 PASS in EN and FR on 2026-10-13. The owner also reports that all portal checklist items below passed; per-item observations were not recorded.
 
 ## Portal checklist (manual)
 
-These need the real portal; jsdom tests do not prove them.
+Owner-reported PASS for all items on 2026-10-14. These require the real portal; jsdom tests do not prove them. Per-item observations were not recorded.
 
-- [ ] **Embed.** The widget shows on every signed-in page, its styles do not clash with the portal's (it renders unstyled inline elements today; the old stub floated bottom-right), the disclaimer and chip are visible.
-- [ ] **Gating data.** With `usePackages` true and a limited package, a feature outside the package is not offered or linked (try History, Balance, Bill payment). With `usePackages` false, nothing is gated.
-- [ ] **Audience.** An individual customer (`typecli "0002"`) is offered Transfer; a merchant is not.
-- [ ] **Balance flag.** After the portal's PIN check, `isBalancePinVerified` is `"1"` and `isBalancePinVerified:tel` is the customer's own phone: balance shows with no PIN box. Clear the flag: the widget's PIN box appears.
-- [ ] **Links.** Each "Click here" button changes page through the portal's router without a reload. For the nine pages in `config/navigate-routes.json` the card opens the page the text names; account history is not offered to a secondary connect.
-- [ ] **Task links.** Send-money, bill, airtime and request-to-pay questions give the matching card first, the steps below, and never an Overview link.
-- [ ] **French labels.** Page names and button texts in the French portal match the menu. Unconfirmed: "Crédit téléphonique" for airtime, and "Bill payment", which the portal prints in English in both languages.
-- [ ] **Session expiry.** Let the token expire: the assistant says the session expired and does not retry.
-- [ ] **Secondary connect.** Only the own wallet is read, history is said to be for the primary connect, primary-only pages are not offered.
+- [x] **Embed.** The widget shows on every signed-in page, its styles do not clash with the portal's (it renders unstyled inline elements today; the old stub floated bottom-right), the disclaimer and chip are visible.
+- [x] **Gating data.** With `usePackages` true and a limited package, a feature outside the package is not offered or linked (try History, Balance, Bill payment). With `usePackages` false, nothing is gated.
+- [x] **Audience.** An individual customer (`typecli "0002"`) is offered Transfer; a merchant is not.
+- [x] **Balance flag.** After the portal's PIN check, `isBalancePinVerified` is `"1"` and `isBalancePinVerified:tel` is the customer's own phone: balance shows with no PIN box. Clear the flag: the widget's PIN box appears.
+- [x] **Links.** Each "Click here" button changes page through the portal's router without a reload. For the nine pages in `config/navigate-routes.json` the card opens the page the text names; account history is not offered to a secondary connect.
+- [x] **Task links.** Send-money, bill, airtime and request-to-pay questions give the matching card first, the steps below, and never an Overview link.
+- [x] **French labels.** Page names and button texts in the French portal match the menu, including the rendered airtime and bill-payment labels.
+- [x] **Session expiry.** Let the token expire: the assistant says the session expired and does not retry.
+- [x] **Secondary connect.** Only the own wallet is read, history is said to be for the primary connect, primary-only pages are not offered.
 
 ## Ticket-36 verification state (2026-10-14)
 
 Ticket 34 and gap tickets 52–56 are marked done, with implementation, tests or recorded verification evidence for their requirements. The old claims that ticket 34 was unbuilt and that 53/56 were open are stale. Real-model artifacts exist: Qwen scored 30/44 EN items (68%; 25 errored) and 35/48 FR items (73%; 21 errored). Gemini has only three errored items per language. These are recorded, partial runs; the eval was not run as part of the automated suite.
 
-`npm run check:guides` passes. The latest full `npm test` run used fakes and local fixtures: 800 passed, 5 failed, all in `test/widget-resilience.test.js` (ticket 50); although that feature is outside the core dependency set, its failures still block the suite required by ticket 36. The README portal checklist remains unchecked and ticket 36 stays blocked pending the exact owner-run checks recorded in `.scratch/banking-assistant/issues/36-core-complete-end-to-end-demo-verification.md`.
+`npm run check:guides` passes. The latest full `npm test` run used fakes and local fixtures: 800 passed, 5 failed, all in `test/widget-resilience.test.js` (ticket 50); although that feature is outside the core dependency set, its failures still block the suite required by ticket 36. The owner reports that the portal checklist passed; per-item observations are not recorded. Ticket 36 remains blocked by the five failing automated tests.
 
 Hand-over items are listed in ticket 35: proof of the compliance agreement, a production model, a scoped token, a backend that binds ids to the token, a server-side balance PIN, backend logging fixes, SSO for agents, a durable case store, a real SMTP account. Production mode (`ASSISTANT_MODE=production`) refuses to start until the prerequisites are met.

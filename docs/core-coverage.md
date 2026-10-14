@@ -156,4 +156,4 @@ Stories 95 and 96 (scoreboard, scripted replay) belong to the later phases (tick
 - **3 proven, with a remaining limit**: 35 and 40 (ticket 58, non-blocking), and 59 (owner decision in ticket 55).
 - **1 gap**: 11, general-concept answers are not asserted in the EN/FR eval set.
 
-Ticket 34 and gaps 52-56 are implemented/done. The demo gate remains blocked by the five failing ticket-50 widget-resilience tests (not a core dependency, but still a required suite failure) and the owner-run portal checklist, whose items are still unchecked. The existing ticket-36 demo run sheet records owner-reported PASS for steps 0-12 in both languages; keep that evidence distinct from the unchecked portal checklist.
+Ticket 34 and gaps 52-56 are implemented/done. The demo gate remains blocked by the five failing ticket-50 widget-resilience tests (not a core dependency, but still a required suite failure) and requires a clean rerun. The owner reports that the portal checklist passed and the existing ticket-36 run sheet records PASS for steps 0-12 in EN and FR; per-item portal observations were not recorded.
