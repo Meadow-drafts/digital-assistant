@@ -3,153 +3,176 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Support console</title>
+  <title>BPay Support · Agent console</title>
   <style>
-    body { font: 14px/1.45 system-ui, sans-serif; margin: 0; background: #f5f4f0; color: #1d1d1b; }
-    main { max-width: 1200px; margin: 0 auto; padding: 1rem; }
-    h1 { font-size: 1.1rem; margin: 0 0 .75rem; }
-    h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: #6b6b66; margin: 0 0 .5rem; }
-    .card { background: #fff; border: 1px solid #dcdad2; border-radius: 8px; padding: .75rem 1rem; }
-    .grid { display: grid; grid-template-columns: 280px 1fr; gap: 1rem; align-items: start; }
-    .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 1rem; align-items: start; margin-top: .5rem; }
-    .workspace .block { margin-top: 0; }
-    @media (max-width: 900px) { .workspace { grid-template-columns: 1fr; } }
-    @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
-    [hidden] { display: none !important; }
-    label { display: block; margin: .4rem 0; }
-    input[type=text], input[type=password] { font: inherit; padding: .35rem .5rem; width: 100%; box-sizing: border-box; }
-    button { font: inherit; border: 1px solid #c9c6bb; background: #fff; border-radius: 6px; padding: .3rem .7rem; cursor: pointer; }
-    button:disabled { opacity: .45; cursor: default; }
-    button.primary { background: #0f6b5c; border-color: #0f6b5c; color: #fff; }
-    [data-role="queue"] { display: grid; gap: .4rem; }
-    [data-role="case-row"] { text-align: left; border-radius: 6px; }
-    [data-role="case-row"][aria-current="true"] { border-color: #0f6b5c; background: #ecfdf5; }
-    [data-role="case-row"][data-level="warning"] { border-left: 4px solid #d97706; }
-    [data-role="case-row"][data-level="urgent"] { border-left: 4px solid #b91c1c; background: #fef2f2; }
-    [data-role="suggestions"] { display: grid; gap: .3rem; margin: .25rem 0; }
-    [data-role="suggestion"] { text-align: left; background: #f0f7ff; border-color: #bfdbfe; }
-    [data-role="note"] { padding: .25rem 0; border-top: 1px solid #ecebe4; white-space: pre-wrap; overflow-wrap: anywhere; }
-    [data-role="transcript"] { display: grid; gap: .3rem; max-height: 22rem; overflow-y: auto; margin: .5rem 0; }
-    [data-role="line"] { padding: .3rem .6rem; border-radius: 6px; background: #ecebe4; max-width: 85%; white-space: pre-wrap; }
-    [data-role="line"][data-from="customer"] { justify-self: start; background: #fff; border: 1px solid #dcdad2; }
-    [data-role="line"][data-from="agent"] { justify-self: end; background: #dbeafe; }
-    [data-role="line"][data-from="bot"] { background: #eef0f3; }
-    [data-role="line"][data-from="system"] { justify-self: center; background: none; color: #6b6b66; font-style: italic; }
-    h3 { font-size: .8rem; margin: 0 0 .25rem; color: #6b6b66; }
-    .block { background: #faf9f5; border: 1px solid #dcdad2; border-radius: 6px; padding: .5rem .75rem; margin: .5rem 0; white-space: pre-wrap; }
-    [data-role="audit-row"] { display: grid; grid-template-columns: 11rem 9rem 1fr; gap: .5rem; font-size: 12px; padding: .2rem 0; border-top: 1px solid #ecebe4; overflow-wrap: anywhere; }
-    [data-role="record"] { font-variant-numeric: tabular-nums; padding: .15rem 0; border-top: 1px solid #ecebe4; }
-    .flag { background: #fee2e2; color: #991b1b; border-radius: 4px; padding: 0 .4rem; font-weight: 600; font-size: 12px; }
-    .who { display: block; font-size: 11px; color: #6b6b66; }
-    .row { display: flex; gap: .5rem; margin: .25rem 0; }
-    .row input { flex: 1; }
-    .error { color: #b3261e; margin: .25rem 0; min-height: 1em; }
-    .note { color: #6b6b66; font-size: 12px; }
+    :root { color-scheme: light; --ink:#20252c; --muted:#657080; --line:#dfe3e8; --surface:#fff; --canvas:#f5f6f8; --brand:#145c50; --brand-soft:#e8f3f0; --urgent:#a82c25; --warn:#9b5a09; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--canvas); color:var(--ink); font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    [hidden] { display:none !important; }
+    button,input,select,textarea { font:inherit; }
+    button { color:inherit; border:1px solid #cbd1d8; border-radius:7px; background:#fff; padding:.55rem .8rem; cursor:pointer; }
+    button:hover:not(:disabled) { border-color:#87929f; }
+    button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible { outline:3px solid #4b9e8e; outline-offset:2px; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    button.primary { background:var(--brand); border-color:var(--brand); color:#fff; }
+    input,select,textarea { min-width:0; border:1px solid #cbd1d8; border-radius:7px; padding:.55rem .65rem; background:#fff; }
+    main { max-width:1320px; margin:0 auto; padding:1.25rem clamp(.75rem,3vw,2rem) 3rem; }
+    .topbar { min-height:64px; display:flex; align-items:center; gap:1.5rem; padding:0 clamp(.75rem,3vw,2rem); background:#fff; border-bottom:1px solid var(--line); }
+    .brand { font-weight:750; letter-spacing:.01em; white-space:nowrap; }
+    .brand-mark { display:inline-grid; place-items:center; width:31px; height:31px; margin-right:.55rem; border-radius:8px; background:var(--brand); color:#fff; }
+    .nav { display:flex; align-items:center; gap:.35rem; }
+    .nav button { border-color:transparent; background:transparent; color:#4e5967; }
+    .nav button[aria-current="page"] { color:var(--brand); background:var(--brand-soft); font-weight:650; }
+    .spacer { flex:1; }
+    .identity { display:flex; align-items:center; gap:.7rem; color:var(--muted); }
+    .identity-name { color:var(--ink); font-weight:600; }
+    h1 { margin:0; font-size:1.65rem; line-height:1.2; letter-spacing:-.02em; }
+    h2 { margin:0; font-size:1.05rem; }
+    h3 { margin:0 0 .45rem; color:#475261; font-size:.83rem; letter-spacing:.04em; text-transform:uppercase; }
+    p { margin:.35rem 0; }
+    .page-head { display:flex; align-items:end; gap:1rem; margin:0 0 1.1rem; }
+    .page-head p,.muted,.note { color:var(--muted); }
+    .page-head p { margin-top:.3rem; }
+    .card { border:1px solid var(--line); border-radius:10px; background:var(--surface); padding:1rem; box-shadow:0 1px 2px #18202b08; }
+    .login-wrap { min-height:calc(100vh - 64px); display:grid; place-items:center; padding:1.5rem; }
+    .login-card { width:min(100%,420px); padding:2rem; }
+    .login-card h1 { margin:.8rem 0 .2rem; }
+    .login-card > p { color:var(--muted); margin:0 0 1.3rem; }
+    .login-card label { display:block; margin:.9rem 0; font-weight:600; }
+    .login-card input { display:block; width:100%; margin-top:.35rem; }
+    .login-card [type=submit] { width:100%; margin-top:.5rem; }
+    .secure-note { margin-top:1rem; padding-top:.9rem; border-top:1px solid var(--line); font-size:.86rem; color:var(--muted); }
+    .error { min-height:1.2em; color:#a32620; }
+    .toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:.55rem; margin-bottom:.8rem; }
+    .toolbar input[type=search] { flex:1 1 210px; }
+    .toolbar select { flex:0 1 185px; }
+    .queue-count { color:var(--muted); font-size:.9rem; }
+    [data-role=queue] { display:grid; gap:.55rem; }
+    [data-role=case-row] { display:grid; grid-template-columns:minmax(105px,.7fr) minmax(130px,1.5fr) minmax(160px,2.3fr) minmax(130px,1fr); align-items:center; gap:.8rem; width:100%; padding:.85rem 1rem; text-align:left; border-color:#e6e9ed; }
+    [data-role=case-row]:hover { background:#f9fbfc; }
+    [data-role=case-row][aria-current=true] { border-color:#8db8ae; background:#f2f8f6; }
+    [data-role=case-row][data-level=warning] { border-left:4px solid #c78324; }
+    [data-role=case-row][data-level=urgent] { border-left:4px solid var(--urgent); }
+    .case-ref { font-weight:700; font-variant-numeric:tabular-nums; }
+    .case-summary { color:#384351; }
+    .case-wait { color:var(--muted); text-align:right; font-variant-numeric:tabular-nums; }
+    .pill { display:inline-block; width:max-content; border-radius:99px; padding:.15rem .55rem; background:#edf0f3; color:#475261; font-size:.79rem; font-weight:650; }
+    .pill.priority { background:#fff0ed; color:var(--urgent); }
+    .pill.waiting { background:#fff5e5; color:var(--warn); }
+    .pill.assigned { background:#eaf2fb; color:#28517a; }
+    .grid { display:grid; grid-template-columns:minmax(0,1fr) 290px; gap:1rem; align-items:start; }
+    .case-heading { display:flex; align-items:flex-start; gap:1rem; padding-bottom:.9rem; border-bottom:1px solid var(--line); }
+    .case-heading h1 { font-size:1.35rem; }
+    .case-meta { margin-top:.35rem; color:var(--muted); }
+    .actions { display:flex; flex-wrap:wrap; align-items:center; gap:.45rem; margin-left:auto; }
+    .actions select { max-width:190px; }
+    .back-button { margin-bottom:.85rem; color:var(--brand); }
+    .block { border:1px solid var(--line); border-radius:8px; padding:.75rem; margin:.75rem 0; background:#fafbfc; white-space:pre-wrap; overflow-wrap:anywhere; }
+    [data-role=summary] { background:#f4f6f8; color:#485362; }
+    [data-role=draft] { background:#fffbf2; }
+    .workspace { display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:1rem; align-items:start; margin-top:.8rem; }
+    .workspace .block { margin:.6rem 0; }
+    [data-role=transcript] { display:grid; gap:.55rem; max-height:min(52vh,580px); min-height:190px; overflow:auto; padding:.8rem 0; }
+    [data-role=line] { max-width:88%; padding:.6rem .75rem; border-radius:9px; background:#edf0f3; white-space:pre-wrap; overflow-wrap:anywhere; }
+    [data-role=line][data-from=customer] { background:#fff; border:1px solid var(--line); }
+    [data-role=line][data-from=agent] { justify-self:end; background:#e6f1ef; }
+    [data-role=line][data-from=system] { justify-self:center; color:var(--muted); background:transparent; font-style:italic; }
+    .who { display:block; color:var(--muted); font-size:.78rem; font-weight:650; margin-bottom:.15rem; }
+    .row { display:flex; align-items:center; gap:.5rem; margin:.55rem 0; }
+    .row input,.row textarea { flex:1; }
+    textarea { width:100%; min-height:76px; resize:vertical; }
+    [data-role=suggestions] { display:grid; gap:.4rem; margin:.4rem 0; }
+    [data-role=suggestion] { text-align:left; background:#f3f7fb; }
+    [data-role=note] { padding:.45rem 0; border-top:1px solid var(--line); white-space:pre-wrap; overflow-wrap:anywhere; }
+    [data-role=record] { padding:.45rem 0; border-top:1px solid var(--line); font-variant-numeric:tabular-nums; }
+    .section-head { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:.8rem; }
+    .filters { display:flex; flex-wrap:wrap; gap:.5rem; margin:.8rem 0; }
+    .filters input,.filters select { min-width:150px; }
+    .metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.8rem; margin:1rem 0; }
+    .metric { min-height:120px; }
+    .metric strong { display:block; font-size:1.7rem; margin:.25rem 0; }
+    .metric label { color:var(--muted); font-size:.9rem; }
+    .data-list > div { padding:.55rem 0; border-top:1px solid var(--line); }
+    [data-role=audit-rows] { overflow-x:auto; }
+    .audit-scroll { overflow-x:auto; }
+    .audit-table { width:100%; min-width:800px; border-collapse:collapse; }
+    .audit-table th { padding:.7rem .5rem; text-align:left; color:var(--muted); background:#f7f8fa; font-size:.82rem; }
+    .audit-row td { padding:.7rem .5rem; border-top:1px solid var(--line); overflow-wrap:anywhere; vertical-align:top; }
+    .small { font-size:.86rem; }
+    @media(max-width:850px) { .grid,.workspace { grid-template-columns:1fr; } .metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .case-heading { flex-wrap:wrap; } .actions { margin-left:0; } }
+    @media(max-width:600px) { .topbar { min-height:58px; gap:.55rem; flex-wrap:wrap; padding-top:.45rem; padding-bottom:.45rem; } .nav { order:3; width:100%; } .nav button { flex:1; padding:.4rem; } .identity { margin-left:auto; } .identity-name { display:none; } main { padding-top:1rem; } .page-head { align-items:start; } [data-role=case-row] { grid-template-columns:1fr auto; gap:.35rem .65rem; } .case-summary { grid-column:1/-1; grid-row:2; } .case-wait { text-align:left; grid-column:1/-1; } .metric-grid { grid-template-columns:1fr 1fr; gap:.5rem; } .metric { padding:.7rem; min-height:110px; } .case-heading { display:block; } .actions { margin-top:.7rem; } .actions select { max-width:none; flex:1 1 140px; } .row.responsive { align-items:stretch; flex-wrap:wrap; } .row.responsive > * { flex:1 1 100%; } }
   </style>
 </head>
 <body>
-<main>
-  <h1>Support console</h1>
-
-  <form data-role="login-form" class="card" style="max-width: 22rem">
-    <h2>Agent login</h2>
-    <label>Agent id <input data-role="agent-id" type="text" autocomplete="username" /></label>
-    <label>Password <input data-role="agent-password" type="password" autocomplete="current-password" /></label>
-    <button class="primary" type="submit">Sign in</button>
-    <p class="error" data-role="login-error" role="alert"></p>
-  </form>
-
-  <div data-role="console" hidden>
-    <p class="note"><span data-role="agent-name"></span> · <button data-role="audit-open" type="button" hidden>Audit log</button> <button data-role="dashboard-open" type="button" hidden>Dashboard</button> <button data-role="logout" type="button">Sign out</button></p>
-    <section class="card" data-role="dashboard-panel" hidden style="margin-bottom: 1rem">
-      <h2>Dashboard (counts from the audit and failed-question logs; no personal data)</h2>
-      <form data-role="dashboard-form" class="row">
-        <input data-role="dashboard-from" type="date" aria-label="From date" />
-        <input data-role="dashboard-to" type="date" aria-label="To date" />
-        <select data-role="dashboard-language" aria-label="Language">
-          <option value="all">All languages</option>
-          <option value="en">English</option>
-          <option value="fr">French</option>
-        </select>
-        <button type="submit">Show</button>
-        <button data-role="dashboard-close" type="button">Close</button>
-      </form>
-      <p class="error" data-role="dashboard-error" role="alert"></p>
-      <p class="note" data-role="dashboard-note"></p>
-      <p>Conversations: <b data-role="dashboard-conversations"></b></p>
-      <p>Handoff rate (conversations that opened a handoff): <b data-role="dashboard-handoff"></b></p>
-      <p>Assistant-resolved (no handoff, and not ended in a refusal or "no verified steps"): <b data-role="dashboard-resolved"></b></p>
-      <h3>Top questions (by the guide or tool that answered)</h3>
-      <div data-role="dashboard-top"></div>
-      <h3>Unresolved topics (failed questions, masked)</h3>
-      <div data-role="dashboard-unresolved"></div>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">B</span>BPay Support</div>
+    <nav class="nav" aria-label="Agent workspace" data-role="navigation" hidden>
+      <button data-role="inbox-open" type="button" aria-current="page">Inbox</button>
+      <button data-role="dashboard-open" type="button" hidden>Dashboard</button>
+      <button data-role="audit-open" type="button" hidden>Audit</button>
+    </nav>
+    <span class="spacer"></span>
+    <div class="identity" data-role="identity" hidden><span class="identity-name" data-role="agent-name"></span><button data-role="logout" type="button">Sign out</button></div>
+  </header>
+  <section data-role="login-form" class="login-wrap" aria-labelledby="login-title">
+    <form class="card login-card">
+      <h1 id="login-title">Welcome back</h1>
+      <p>Sign in with your support-team credentials to manage customer cases.</p>
+      <label>Agent ID <input data-role="agent-id" type="text" autocomplete="username" required /></label>
+      <label>Password <input data-role="agent-password" type="password" autocomplete="current-password" required /></label>
+      <button class="primary" type="submit">Sign in</button>
+      <p class="error" data-role="login-error" role="alert" aria-live="polite"></p>
+      <div class="secure-note">Access is limited to authorized support staff. Dashboard and audit access depend on your role.</div>
+    </form>
+  </section>
+  <main data-role="console" hidden>
+    <section data-role="queue-screen" aria-labelledby="inbox-title">
+      <div class="page-head"><div><h1 id="inbox-title">Inbox</h1><p>Active customer cases, ordered by priority and waiting time.</p></div><span class="spacer"></span><span class="queue-count" data-role="queue-count"></span></div>
+      <div class="toolbar" aria-label="Filter cases">
+        <input data-role="queue-search" type="search" placeholder="Search case reference" aria-label="Search case reference" />
+        <select data-role="queue-status" aria-label="Filter by case status"><option value="active">All active</option><option value="waiting">Waiting</option><option value="with_agent">With an agent</option><option value="resolved">Resolved</option></select>
+        <select data-role="queue-language" aria-label="Filter by conversation language"><option value="all">All languages</option><option value="en">English</option><option value="fr">French</option></select>
+        <p class="note small" data-role="queue-thresholds" aria-live="polite"></p>
+      </div>
+      <section class="card" aria-label="Case queue"><div data-role="queue" aria-live="polite"></div><p class="note" data-role="queue-empty" role="status">No active cases.</p><p class="error" data-role="queue-error" role="alert"></p></section>
     </section>
-    <section class="card" data-role="audit-panel" hidden style="margin-bottom: 1rem">
-      <h2>Audit log (read only, newest first)</h2>
-      <form data-role="audit-form" class="row">
-        <input data-role="audit-conversation" type="text" placeholder="Conversation id" aria-label="Conversation id" />
-        <input data-role="audit-outcome" type="text" placeholder="Outcome, e.g. case_claimed" aria-label="Outcome" />
-        <input data-role="audit-from" type="date" aria-label="From date" />
-        <input data-role="audit-to" type="date" aria-label="To date" />
-        <button type="submit">Show</button>
-        <button data-role="audit-export-csv" type="button">Download CSV</button>
-        <button data-role="audit-export-json" type="button">Download JSON</button>
-        <button data-role="audit-close" type="button">Close</button>
-      </form>
-      <p class="error" data-role="audit-error" role="alert"></p>
-      <div data-role="audit-rows"></div>
-    </section>
-    <div class="grid">
-      <section class="card">
-        <h2>Cases</h2>
-        <div data-role="queue"></div>
-        <p class="note" data-role="queue-empty">No cases yet.</p>
-        <p class="note" data-role="queue-thresholds"></p>
-      </section>
+    <section data-role="case-screen" hidden aria-labelledby="case-page-title">
+      <button class="back-button" data-role="back-to-queue" type="button">← Back to queue</button>
       <section class="card" data-role="detail" hidden>
-        <h2 data-role="detail-ref"></h2>
-        <p>State: <b data-role="detail-state"></b> · Claimed by: <span data-role="detail-claimed-by"></span> <span class="flag" data-role="priority" hidden>PRIORITY: wrong transfer</span></p>
+        <div class="case-heading">
+          <div><h1 id="case-page-title" data-role="detail-ref"></h1><p class="case-meta"><span data-role="detail-state"></span> · Assigned to <span data-role="detail-claimed-by"></span> <span class="pill priority" data-role="priority" hidden>Priority · wrong transfer</span><span data-role="detail-wait" class="small"></span></p></div>
+          <div class="actions"><button class="primary" data-role="claim" type="button">Claim / take over</button><select data-role="transfer-to" aria-label="Colleague to transfer to"></select><button data-role="transfer" type="button">Transfer</button><button data-role="resolve" type="button">Mark resolved</button></div>
+        </div>
+        <p class="error" data-role="claim-error" role="alert" aria-live="polite"></p>
         <div data-role="draft" class="block" hidden><h3>Customer's draft</h3><div data-role="draft-text"></div></div>
         <div data-role="summary" class="block" hidden><h3 data-role="summary-label"></h3><div data-role="summary-text"></div></div>
-        <p class="error" data-role="claim-error" role="alert"></p>
-        <div class="row">
-          <button class="primary" data-role="claim" type="button">Claim this case</button>
-          <button data-role="resolve" type="button">Mark resolved</button>
-          <select data-role="transfer-to" aria-label="Colleague to transfer to"></select>
-          <button data-role="transfer" type="button">Transfer</button>
-        </div>
         <div class="workspace" data-role="workspace">
-          <div data-role="chat">
-            <details data-role="transcript-box"><summary>Raw transcript</summary><div data-role="transcript"></div></details>
-            <div class="row">
-              <select data-role="suggest-count" aria-label="Number of draft replies"><option value="1">1 draft</option><option value="2">2 drafts</option><option value="3" selected>3 drafts</option></select>
-              <button data-role="suggest" type="button">Suggest replies</button>
-              <span class="note">Drafts only: pick one, edit it, then send.</span>
-            </div>
-            <p class="note" data-role="suggestions-message" role="status"></p>
-            <div data-role="suggestions"></div>
-            <form data-role="reply-form" class="row">
-              <input data-role="reply-input" type="text" maxlength="1000" autocomplete="off" placeholder="Reply to the customer…" />
-              <button data-role="reply-send" type="submit">Send</button>
-            </form>
-          </div>
-          <aside data-role="side">
-            <div data-role="records-box" class="block" hidden><h3>Recent transactions (masked)</h3><div data-role="records"></div></div>
-            <div data-role="notes-box" class="block">
-              <h3>Internal notes (never shown to the customer)</h3>
-              <div data-role="notes"></div>
-              <form data-role="note-form" class="row">
-                <input data-role="note-input" type="text" maxlength="1000" autocomplete="off" placeholder="Add an internal note…" />
-                <button data-role="note-add" type="submit">Add</button>
-              </form>
-              <p class="error" data-role="note-error" role="alert"></p>
-            </div>
+          <section data-role="chat" aria-label="Customer conversation">
+            <details data-role="transcript-box"><summary>Conversation transcript</summary><div data-role="transcript" aria-live="polite"></div></details>
+            <div class="row responsive"><label class="small" for="suggest-count">Draft replies</label><select id="suggest-count" data-role="suggest-count" aria-label="Number of draft replies"><option value="1">1 draft</option><option value="2">2 drafts</option><option value="3" selected>3 drafts</option></select><button data-role="suggest" type="button">Suggest replies</button><span class="note small">Drafts only · choose to edit, then send</span></div>
+            <p class="note" data-role="suggestions-message" role="status" aria-live="polite"></p><div data-role="suggestions"></div>
+            <form data-role="reply-form" class="row responsive"><textarea data-role="reply-input" maxlength="1000" autocomplete="off" aria-label="Reply to the customer" placeholder="Write a reply to the customer…"></textarea><button class="primary" data-role="reply-send" type="submit">Send reply</button></form>
+          </section>
+          <aside data-role="side" aria-label="Case details">
+            <div data-role="records-box" class="block" hidden><h3>Recent transactions · masked</h3><div data-role="records"></div></div>
+            <section data-role="notes-box" class="block"><h3>Internal notes · agent only</h3><div data-role="notes"></div><form data-role="note-form" class="row responsive"><input data-role="note-input" type="text" maxlength="1000" autocomplete="off" aria-label="Add a private internal note" placeholder="Add a private note…" /><button data-role="note-add" type="submit">Add note</button></form><p class="error" data-role="note-error" role="alert"></p></section>
           </aside>
         </div>
       </section>
-    </div>
-  </div>
-</main>
-<script src="/console.js"></script>
+    </section>
+    <section class="card" data-role="dashboard-panel" hidden aria-labelledby="dashboard-title">
+      <div class="section-head"><div><h1 id="dashboard-title">Dashboard</h1><p class="note">Service trends from masked audit and failed-question records.</p></div></div>
+      <form data-role="dashboard-form" class="filters"><label>From <input data-role="dashboard-from" type="date" aria-label="Dashboard from date" /></label><label>To <input data-role="dashboard-to" type="date" aria-label="Dashboard to date" /></label><label>Language <select data-role="dashboard-language" aria-label="Dashboard language"><option value="all">All languages</option><option value="en">English</option><option value="fr">French</option></select></label><button class="primary" type="submit">Apply filters</button></form>
+      <p class="error" data-role="dashboard-error" role="alert"></p><p class="note" data-role="dashboard-note" role="status"></p>
+      <div class="metric-grid"><article class="card metric"><label>Conversations</label><strong data-role="dashboard-conversations"></strong><span class="note small">In selected period</span></article><article class="card metric"><label>Handoff rate</label><strong data-role="dashboard-handoff"></strong><span class="note small">Cases opened / conversations</span></article><article class="card metric"><label>Assistant-resolved</label><strong data-role="dashboard-resolved"></strong><span class="note small">No handoff or refusal</span></article><article class="card metric"><label>Unresolved topics</label><strong data-role="dashboard-unresolved-count"></strong><span class="note small">Masked failed questions</span></article></div>
+      <div class="grid"><section class="card"><h2>Top answered topics</h2><p class="note">Grouped by guide or read-only tool used.</p><div class="data-list" data-role="dashboard-top"></div></section><section class="card"><h2>Unresolved questions</h2><p class="note">Masked questions without a verified answer.</p><div class="data-list" data-role="dashboard-unresolved"></div></section></div>
+    </section>
+    <section class="card" data-role="audit-panel" hidden aria-labelledby="audit-title">
+      <div class="section-head"><div><h1 id="audit-title">Audit log</h1><p class="note">Read-only record of assistant, case, and agent events.</p></div><span class="pill">Restricted access</span></div>
+      <form data-role="audit-form" class="filters"><label>Conversation ID <input data-role="audit-conversation" type="text" placeholder="Conversation ID" /></label><label>Outcome <input data-role="audit-outcome" type="text" placeholder="case_claimed" /></label><label>From <input data-role="audit-from" type="date" /></label><label>To <input data-role="audit-to" type="date" /></label><button class="primary" type="submit">Apply filters</button><button data-role="audit-export-csv" type="button">Download CSV</button><button data-role="audit-export-json" type="button">Download JSON</button></form>
+      <p class="error" data-role="audit-error" role="alert"></p><p class="note small">Filters and exports are recorded in the audit log.</p><div class="audit-scroll" data-role="audit-rows" aria-live="polite"></div>
+    </section>
+  </main>
+  <script src="/console.js"></script>
 </body>
 </html>

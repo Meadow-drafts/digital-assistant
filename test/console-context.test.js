@@ -288,7 +288,7 @@ test('a second agent cannot open a case another agent has claimed, and learns on
   assert.doesNotMatch(JSON.stringify(denied.body), /wrong person|summary|REF-0001|transcript/);
   assert.equal((await aline.open(ref)).status, 200, 'the agent who has it still sees it');
   const listed = (await paul.list()).body.cases.find((c) => c.ref === ref);
-  assert.deepEqual(Object.keys(listed).sort(), ['claimable', 'claimedBy', 'closeReason', 'priority', 'ref', 'state', 'waitLevel', 'waitingFor', 'waitingSeconds'], 'the queue row carries no content');
+  assert.deepEqual(Object.keys(listed).sort(), ['claimable', 'claimedBy', 'closeReason', 'language', 'priority', 'ref', 'state', 'waitLevel', 'waitingFor', 'waitingSeconds'], 'the queue row adds only the language needed by its filter, not case content');
 });
 
 test('a resolved case stays with the agent who handled it', async (t) => {

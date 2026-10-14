@@ -10,6 +10,7 @@ let selected = new URLSearchParams(location.search).get('case');
 let timer = null;
 let shownLines = '';
 let canReadAudit = false;
+let deepLinkPending = Boolean(selected);
 
 try { token = sessionStorage.getItem('console:token'); me = sessionStorage.getItem('console:name'); canReadAudit = sessionStorage.getItem('console:audit') === '1'; } catch { /* no storage: sign in again */ }
 
@@ -21,7 +22,7 @@ async function api(method, path, body) {
       body: body ? JSON.stringify(body) : undefined,
     });
     const data = await res.json().catch(() => ({}));
-    if (res.status === 401 && token) signOut();
+    if (res.status === 401 && token) signOut('Your session expired. Please sign in again.');
     return { ok: res.ok, status: res.status, body: data };
   } catch {
     // Network loss (including a page closing with a poll in flight) is a failed request, not an unhandled event-handler rejection.
@@ -29,7 +30,7 @@ async function api(method, path, body) {
   }
 }
 
-function signOut() {
+function signOut(reason = '') {
   token = null;
   me = null;
   clearTimeout(timer);
@@ -38,16 +39,51 @@ function signOut() {
   $('audit-panel').hidden = true;
   $('dashboard-panel').hidden = true;
   $('console').hidden = true;
+  $('navigation').hidden = true;
+  $('identity').hidden = true;
   $('login-form').hidden = false;
+  $('login-error').textContent = reason;
 }
 
 function showConsole() {
   $('login-form').hidden = true;
   $('console').hidden = false;
+  $('navigation').hidden = false;
+  $('identity').hidden = false;
   $('agent-name').textContent = me ?? '';
   $('dashboard-open').hidden = !canReadAudit;
   $('audit-open').hidden = !canReadAudit; // the service enforces it; this only keeps the button away from staff who cannot use it
+  if (!selected) showPage('inbox');
   refresh();
+}
+
+function showPage(page) {
+  const inbox = page === 'inbox';
+  $('queue-screen').hidden = !inbox || Boolean(selected && $('case-screen').dataset.open === '1');
+  $('case-screen').hidden = !inbox || $('case-screen').dataset.open !== '1';
+  $('dashboard-panel').hidden = page !== 'dashboard';
+  $('audit-panel').hidden = page !== 'audit';
+  for (const [role, name] of [['inbox-open', 'inbox'], ['dashboard-open', 'dashboard'], ['audit-open', 'audit']]) {
+    const button = $(role);
+    button.toggleAttribute('aria-current', page === name);
+    if (page === name) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  }
+}
+
+function openCase(ref) {
+  selected = ref;
+  deepLinkPending = false;
+  $('case-screen').dataset.open = '1';
+  const url = new URL(location.href);
+  url.searchParams.set('case', ref);
+  history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  showPage('inbox');
+}
+
+function backToQueue() {
+  $('case-screen').dataset.open = '0';
+  showPage('inbox');
 }
 
 const label = (c) => {
@@ -70,19 +106,33 @@ function renderThresholds(t) {
 
 function renderQueue(cases) {
   const queue = $('queue');
-  queue.replaceChildren(...cases.map((c) => {
+  const status = $('queue-status').value;
+  const language = $('queue-language').value;
+  const search = $('queue-search').value.trim().toLowerCase();
+  const visible = cases.filter((c) => {
+    const statusMatches = status === 'active' ? c.state !== 'resolved' : c.state === status;
+    const languageMatches = language === 'all' || c.language === language;
+    return statusMatches && languageMatches && (!search || c.ref.toLowerCase().includes(search));
+  });
+  queue.replaceChildren(...visible.map((c) => {
     const b = document.createElement('button');
     b.type = 'button';
     b.dataset.role = 'case-row';
     b.dataset.ref = c.ref;
     if (c.ref === selected) b.setAttribute('aria-current', 'true');
     if (c.waitLevel) b.dataset.level = c.waitLevel;
-    const wait = c.waitingSeconds === null ? '' : ` · waiting ${clock(c.waitingSeconds)}${c.waitingFor === 'reply' ? ' for a reply' : ''}${SLOW[c.waitLevel] ?? ''}`;
-    b.textContent = `${c.priority ? 'PRIORITY · ' : ''}${c.ref} · ${label(c)}${wait}`;
-    b.addEventListener('click', () => { if (selected !== c.ref) clearSuggestions(); selected = c.ref; shownLines = ''; refresh(); });
+    const ref = document.createElement('span'); ref.className = 'case-ref'; ref.textContent = c.ref;
+    const state = document.createElement('span'); state.className = `pill ${c.state === 'waiting' ? 'waiting' : c.state === 'with_agent' ? 'assigned' : ''}`; state.textContent = label(c);
+    const summary = document.createElement('span'); summary.className = 'case-summary'; summary.textContent = c.priority ? 'Wrong transfer · priority case' : c.state === 'resolved' ? 'Resolved customer case' : c.state === 'waiting' ? 'Waiting for an agent' : `Conversation with ${c.claimedBy ?? 'an agent'}`;
+    const wait = document.createElement('span'); wait.className = 'case-wait';
+    wait.textContent = c.waitingSeconds === null ? (c.priority ? 'Priority' : '') : `waiting ${clock(c.waitingSeconds)}${c.waitingFor === 'reply' ? ' for a reply' : ''}${SLOW[c.waitLevel] ?? ''}`;
+    b.append(ref, state, summary, wait);
+    b.addEventListener('click', () => { if (selected !== c.ref) clearSuggestions(); shownLines = ''; openCase(c.ref); refresh(); });
     return b;
   }));
-  $('queue-empty').hidden = cases.length > 0;
+  $('queue-count').textContent = `${visible.length} ${visible.length === 1 ? 'case' : 'cases'}`;
+  $('queue-empty').hidden = visible.length > 0;
+  $('queue-empty').textContent = visible.length ? '' : cases.length ? 'No cases match these filters.' : 'No active cases.';
 }
 
 const money = (r) => `${r.amount ?? '?'}${r.currency ? ` ${r.currency}` : ''}`;
@@ -162,6 +212,7 @@ function renderDetail(d) {
   $('detail-ref').textContent = `Case ${d.ref}`;
   $('detail-state').textContent = label(d);
   $('detail-claimed-by').textContent = d.claimedBy ?? 'nobody';
+  $('detail-wait').textContent = d.waitingSeconds === null || d.waitingSeconds === undefined ? '' : ` · ${d.waitingFor === 'reply' ? 'waiting for reply' : 'waiting'} ${clock(d.waitingSeconds)}${SLOW[d.waitLevel] ?? ''}`;
   const mine = d.state === 'with_agent' && d.claimedBy === me;
   $('claim').disabled = !d.claimable;
   $('resolve').disabled = !mine;
@@ -203,15 +254,21 @@ async function refresh() {
     const list = await api('GET', '/agent/cases');
     if (!document?.body?.isConnected) return;
     if (list.ok) { renderQueue(list.body.cases); renderThresholds(list.body.thresholds); }
+    if (!list.ok) $('queue-error').textContent = 'Could not refresh the case queue. Retrying shortly.';
+    else $('queue-error').textContent = '';
     if (selected && list.ok) {
       const detail = await api('GET', `/agent/cases/${encodeURIComponent(selected)}`);
       if (!document?.body?.isConnected) return;
-      if (detail.ok) renderDetail(detail.body);
+      if (detail.ok) {
+        renderDetail(detail.body);
+        if (deepLinkPending) { $('case-screen').dataset.open = '1'; showPage('inbox'); deepLinkPending = false; }
+      }
       else if (detail.status === 403) {
         // Another agent has it: show who, and nothing of the case itself.
         const held = list.body.cases.find((c) => c.ref === selected);
         shownLines = '';
         renderDetail({ ...held, claimedBy: detail.body.claimedBy ?? held?.claimedBy ?? null, ref: selected, transcript: [] });
+        if (deepLinkPending) { $('case-screen').dataset.open = '1'; showPage('inbox'); deepLinkPending = false; }
       }
     }
   } catch { /* the next refresh tries again */ }
@@ -226,7 +283,12 @@ $('login-form').addEventListener('submit', async (e) => {
   const res = await api('POST', '/agent/login', { id: $('agent-id').value.trim(), password: $('agent-password').value });
   if (!pageOpen()) return;
   $('agent-password').value = '';
-  if (!res.ok) { $('login-error').textContent = 'Wrong agent id or password.'; return; }
+  if (!res.ok) {
+    $('login-error').textContent = res.status === 0 || res.status >= 500
+      ? 'Unable to sign in right now. Check your connection and try again.'
+      : 'Wrong agent ID or password.';
+    return;
+  }
   token = res.body.token;
   me = res.body.name;
   canReadAudit = res.body.canReadAudit === true;
@@ -235,6 +297,11 @@ $('login-form').addEventListener('submit', async (e) => {
 });
 
 $('logout').addEventListener('click', signOut);
+$('inbox-open').addEventListener('click', () => showPage('inbox'));
+$('back-to-queue').addEventListener('click', backToQueue);
+$('queue-search').addEventListener('input', () => refresh());
+$('queue-status').addEventListener('change', () => refresh());
+$('queue-language').addEventListener('change', () => refresh());
 
 // Audit log reader (authorised staff only; the service refuses everyone else). Read only, set as text.
 function auditFilters() {
@@ -250,18 +317,32 @@ async function loadAudit() {
   const res = await api('GET', `/agent/audit${query.size ? `?${query}` : ''}`);
   if (!res.ok) { $('audit-error').textContent = res.status === 403 ? 'You are not authorised to read the audit log.' : 'Could not load the audit log.'; $('audit-rows').replaceChildren(); return; }
   const detail = (r) => Object.entries(r)
-    .filter(([k, v]) => !['time', 'user', 'outcome'].includes(k) && v !== '' && v !== null && !(Array.isArray(v) && !v.length))
+    .filter(([k, v]) => !['time', 'user', 'outcome', 'conversationId'].includes(k) && v !== '' && v !== null && !(Array.isArray(v) && !v.length))
     .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join(' · ');
-  $('audit-rows').replaceChildren(...res.body.records.map((r) => {
-    const row = document.createElement('div');
+  const table = document.createElement('table');
+  table.className = 'audit-table';
+  const head = document.createElement('thead');
+  const headings = document.createElement('tr');
+  for (const title of ['Time', 'Actor', 'Outcome', 'Conversation', 'Recorded details']) {
+    const cell = document.createElement('th');
+    cell.scope = 'col';
+    cell.textContent = title;
+    headings.append(cell);
+  }
+  head.append(headings);
+  const body = document.createElement('tbody');
+  body.append(...res.body.records.map((r) => {
+    const row = document.createElement('tr');
     row.dataset.role = 'audit-row';
-    for (const text of [r.time, r.outcome ?? '', `${r.user} · ${detail(r)}`]) {
-      const cell = document.createElement('span');
+    for (const text of [r.time, r.user ?? '', r.outcome ?? '', r.conversationId ?? '', detail(r)]) {
+      const cell = document.createElement('td');
       cell.textContent = text;
       row.append(cell);
     }
     return row;
   }));
+  table.append(head, body);
+  $('audit-rows').replaceChildren(table);
 }
 // The export file for the filters on screen. Fetched with the session token, then handed to the browser as a download.
 async function exportAudit(format) {
@@ -280,8 +361,7 @@ async function exportAudit(format) {
 }
 $('audit-export-csv').addEventListener('click', () => exportAudit('csv'));
 $('audit-export-json').addEventListener('click', () => exportAudit('json'));
-$('audit-open').addEventListener('click', () => { $('dashboard-panel').hidden = true; $('audit-panel').hidden = false; loadAudit(); });
-$('audit-close').addEventListener('click', () => { $('audit-panel').hidden = true; });
+$('audit-open').addEventListener('click', () => { showPage('audit'); loadAudit(); });
 $('audit-form').addEventListener('submit', (e) => { e.preventDefault(); loadAudit(); });
 
 // Staff dashboard (same staff as the audit log). Counts and percentages, set as text; the service sends no personal data.
@@ -306,13 +386,26 @@ async function loadDashboard() {
   $('dashboard-conversations').textContent = String(d.conversations.count);
   $('dashboard-handoff').textContent = figureText(d.handoffRate);
   $('dashboard-resolved').textContent = figureText(d.assistantResolved);
+  $('dashboard-unresolved-count').textContent = String(d.unresolved.length);
   $('dashboard-note').textContent = d.conversations.small ? `Small number: these figures come from fewer than ${d.smallNumberBelow} conversations, so read them with care.` : '';
   const small = (item) => (item.small ? ` (fewer than ${d.smallNumberBelow} conversations)` : '');
-  rows($('dashboard-top'), d.topQuestions, (q) => `${q.kind} ${q.id}: ${q.turns} questions in ${q.conversations} conversations${small(q)}`);
+  const top = $('dashboard-top');
+  const largest = Math.max(1, ...d.topQuestions.map((q) => q.turns));
+  top.replaceChildren(...d.topQuestions.map((q) => {
+    const item = document.createElement('div');
+    const label = document.createElement('span');
+    label.textContent = `${q.kind} ${q.id}: ${q.turns} questions in ${q.conversations} conversations${small(q)}`;
+    const bar = document.createElement('progress');
+    bar.max = largest;
+    bar.value = q.turns;
+    bar.setAttribute('aria-label', `${q.id}: ${q.turns} answered questions`);
+    item.append(label, bar);
+    return item;
+  }));
+  if (!d.topQuestions.length) top.textContent = 'Nothing in this range.';
   rows($('dashboard-unresolved'), d.unresolved, (u) => `${u.text} [${u.language}]: ${u.count} times in ${u.conversations} conversations${small(u)}`);
 }
-$('dashboard-open').addEventListener('click', () => { $('audit-panel').hidden = true; $('dashboard-panel').hidden = false; loadDashboard(); });
-$('dashboard-close').addEventListener('click', () => { $('dashboard-panel').hidden = true; });
+$('dashboard-open').addEventListener('click', () => { showPage('dashboard'); loadDashboard(); });
 $('dashboard-form').addEventListener('submit', (e) => { e.preventDefault(); loadDashboard(); });
 
 $('claim').addEventListener('click', async () => {
