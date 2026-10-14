@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { verifyPassword } from './password.js';
-import { createCaseStore } from './cases.js';
+import { createCaseStore, lastActivity } from './cases.js';
 import { createHours } from './hours.js';
 import { json, readJson } from './http.js';
 import { maskText } from './mask.js';
-import { ownerOf, tokenOf } from './identity.js';
+import { tokenOf } from './identity.js';
 import { cuesIn } from './chip.js';
 import { computeDashboard } from './dashboard.js';
 import { SUMMARY_LABEL, createSummarizer } from './summary.js';
@@ -42,6 +42,11 @@ const CUSTOMER_MAIL = {
     en: (ref) => ({ subject: `[${ref}] We received your request`, body: `We received your request (case ${ref}) outside our opening hours.\nAn agent will pick it up at the start of the next shift. We will update you within 24 hours.` }),
     fr: (ref) => ({ subject: `[${ref}] Nous avons bien reçu votre demande`, body: `Nous avons reçu votre demande (dossier ${ref}) en dehors de nos horaires d'ouverture.\nUn agent la prendra au début de la prochaine période d'ouverture. Nous vous tiendrons informé dans les 24 heures.` }),
   },
+  // The confirmation when a case opens during opening hours (after hours, `received` above is the confirmation).
+  opened: {
+    en: (ref) => ({ subject: `[${ref}] Your request is open`, body: `Your request is open (case ${ref}). You can follow it under "My cases" in the chat on the portal.\nWe will update you within 24 hours.` }),
+    fr: (ref) => ({ subject: `[${ref}] Votre demande est ouverte`, body: `Votre demande est ouverte (dossier ${ref}). Vous pouvez la suivre sous « Mes dossiers » dans le chat du portail.\nNous vous tiendrons informé dans les 24 heures.` }),
+  },
   reply: {
     en: (ref) => ({ subject: `[${ref}] You have a new message`, body: `An agent answered your case ${ref}. Open the chat on the portal to read it.` }),
     fr: (ref) => ({ subject: `[${ref}] Vous avez un nouveau message`, body: `Un agent a répondu à votre dossier ${ref}. Ouvrez le chat sur le portail pour le lire.` }),
@@ -49,9 +54,9 @@ const CUSTOMER_MAIL = {
 };
 
 // Customer and agent routes for handoff cases. Returns true when it served the request.
-export function createHandoff({ clock, audit, failedQuestions, mailer, agents, support, consoleUrl, conversations, model, recordsFor }) {
+export function createHandoff({ identity, database, clock, audit, failedQuestions, mailer, agents, support, consoleUrl, conversations, model, recordsFor, retentionMs }) {
   const summarize = createSummarizer({ model });
-  const store = createCaseStore({ clock });
+  const store = createCaseStore({ clock, database, agentById: (id) => agents?.list?.find((a) => a.id === id) });
   const { timers } = support;
   const hours = createHours(support.hours);
   const onCall = (agents?.onCall ?? []).map((id) => agents.list.find((a) => a.id === id)).filter(Boolean);
@@ -64,6 +69,15 @@ export function createHandoff({ clock, audit, failedQuestions, mailer, agents, s
   const add = (c, from, text, extra) => store.append(c, from, from === 'agent' || from === 'system' ? text : maskText(text), extra);
   // A system line the customer sees too (the soft "still working on it", the transfer notice).
   const notify = (c, texts) => add(c, 'system', texts[c.language] ?? texts.en, { public: true });
+
+  // Who is calling, from the signed session id (see identity.js); a bad or expired id is a 401. `verified` routes also
+  // refuse a guest, who has no gateway-checked identity.
+  function caller(req, res, { verified = false } = {}) {
+    const who = identity.resolve(req);
+    if (who.error) { json(res, 401, { error: who.error }); return null; }
+    if (verified && !who.verified) { json(res, 401, { error: 'session_required' }); return null; }
+    return who.owner;
+  }
 
   const view = (c) => ({
     state: c.state, ref: c.ref, notice: NOTICE[c.language],
@@ -111,25 +125,38 @@ export function createHandoff({ clock, audit, failedQuestions, mailer, agents, s
   // (the controllable clock cannot cancel a timer that was set before a restart, so the old one just finds it is stale).
   //   silence: the customer is waiting for the agent. Soft message at agentSilenceMs, re-broadcast at agentFollowUpMs.
   //   activity: any message on the case. No message for autoResolveMs resolves it.
+  // Every deadline is worked out from a time stored on the case (silenceStartedAt, activityAt), so after a restart the
+  // same timers are armed again for the same moments (ticket 62): one already due fires at once, the rest keep their time.
+  const remaining = (from, ms) => Math.max(0, from + ms - clock.now());
+  function armSilence(c) {
+    const gen = c.silenceGen;
+    const live = () => c.state === 'with_agent' && c.silenceGen === gen;
+    if (!c.softSent) {
+      clock.setTimeout(async () => {
+        if (!live()) return;
+        c.softSent = true;
+        notify(c, SOFT);
+        await record(c, 'case_still_working');
+      }, remaining(c.silenceStartedAt, timers.agentSilenceMs));
+    }
+    if (!c.followUpOffered) {
+      clock.setTimeout(async () => {
+        if (!live()) return;
+        c.followUpOffered = true;
+        c.openToPool = true; // from this moment any agent can open and claim it; set before the first await
+        notify(c, FOLLOW_UP);
+        await page(c, agents.list, 'case_rebroadcast', overdueText);
+      }, remaining(c.silenceStartedAt, timers.agentFollowUpMs));
+    }
+  }
   function awaitAgent(c) {
     c.silenceGen = (c.silenceGen ?? 0) + 1;
-    const gen = c.silenceGen;
     c.awaitingAgent = true;
     c.followUpOffered = false;
+    c.softSent = false;
     c.openToPool = false; // a new clock means somebody is on it again: the case is closed to the pool
-    const live = () => c.state === 'with_agent' && c.silenceGen === gen;
-    clock.setTimeout(async () => {
-      if (!live()) return;
-      notify(c, SOFT);
-      await record(c, 'case_still_working');
-    }, timers.agentSilenceMs);
-    clock.setTimeout(async () => {
-      if (!live()) return;
-      c.followUpOffered = true;
-      c.openToPool = true; // from this moment any agent can open and claim it; set before the first await
-      notify(c, FOLLOW_UP);
-      await page(c, agents.list, 'case_rebroadcast', overdueText);
-    }, timers.agentFollowUpMs);
+    c.silenceStartedAt = clock.now();
+    armSilence(c);
   }
   function agentAnswered(c) {
     c.silenceGen = (c.silenceGen ?? 0) + 1;
@@ -137,15 +164,19 @@ export function createHandoff({ clock, audit, failedQuestions, mailer, agents, s
     c.followUpOffered = false;
     c.openToPool = false; // the holder replied: it is theirs alone again
   }
-  function touch(c) {
-    c.activityGen = (c.activityGen ?? 0) + 1;
+  function armActivity(c) {
     const gen = c.activityGen;
     clock.setTimeout(async () => {
       if (c.state !== 'with_agent' || c.activityGen !== gen) return;
       store.resolve(c, 'auto_resolved');
       add(c, 'system', 'Case closed automatically: no messages from either side.');
       await record(c, 'case_auto_resolved');
-    }, timers.autoResolveMs);
+    }, remaining(c.activityAt, timers.autoResolveMs));
+  }
+  function touch(c) {
+    c.activityGen = (c.activityGen ?? 0) + 1;
+    c.activityAt = clock.now();
+    armActivity(c);
   }
 
   // A resolved case comes back when the customer asks for a person again within the window; cancelled ones never do.
@@ -179,10 +210,15 @@ export function createHandoff({ clock, audit, failedQuestions, mailer, agents, s
   const later = (c, ms, fn) => clock.setTimeout(async () => { if (stillWaiting(c)) await fn(); }, ms);
 
   // On-call first; the whole pool after broadcastMs unclaimed; the customer told "queued" after queuedNoticeMs.
+  // The moment paging began is stored, so a restart arms the same two timers for the same moments.
   async function startPaging(c) {
+    c.pagingStartedAt = clock.now();
     await page(c, onCall, 'case_paged');
-    later(c, timers.broadcastMs, () => page(c, agents.list, 'case_broadcast'));
-    later(c, timers.queuedNoticeMs, async () => { c.queued = true; await record(c, 'case_queued'); });
+    armPaging(c);
+  }
+  function armPaging(c) {
+    if (!c.broadcastDone) later(c, remaining(c.pagingStartedAt, timers.broadcastMs), async () => { c.broadcastDone = true; await page(c, agents.list, 'case_broadcast'); });
+    if (!c.queued) later(c, remaining(c.pagingStartedAt, timers.queuedNoticeMs), async () => { c.queued = true; await record(c, 'case_queued'); });
   }
 
   // Outside opening hours: queued at once, the customer is emailed, the page waits for the next shift start.
@@ -194,9 +230,12 @@ export function createHandoff({ clock, audit, failedQuestions, mailer, agents, s
     const email = conversation.session?.email;
     if (email) await send(c, { to: email, ...CUSTOMER_MAIL.received[c.language](c.ref) }, 'customer_confirmation_emailed');
     else await record(c, 'customer_email_missing');
-    // At shift start everything that queued is paged in one pass, priority cases first, then in the order they came in.
     afterHoursQueue.add(c);
-    later(c, hours.nextOpen(clock.now()) - clock.now(), async () => {
+    armAfterHours(c);
+  }
+  // At shift start everything that queued is paged in one pass, priority cases first, then in the order they came in.
+  function armAfterHours(c) {
+    later(c, Math.max(0, hours.nextOpen(c.openedAt) - clock.now()), async () => {
       const batch = [...afterHoursQueue].filter(stillWaiting).sort((x, y) => Number(Boolean(y.priority)) - Number(Boolean(x.priority)) || x.openedAt - y.openedAt);
       afterHoursQueue.clear();
       for (const queued of batch) { queued.afterHours = false; queued.queued = false; await startPaging(queued); }
@@ -240,15 +279,20 @@ export function createHandoff({ clock, audit, failedQuestions, mailer, agents, s
     c.customerEmail = conversation.session?.email ?? null;
     customerSeen(c);
     await record(c, 'handoff_opened');
-    if (hours.isOpen(clock.now())) await startPaging(c);
-    else await queueUntilOpen(c, conversation);
+    if (hours.isOpen(clock.now())) {
+      // Ticket 38: the customer is emailed the reference. Fixed sentence and the reference only, never message content.
+      if (c.customerEmail) await send(c, { to: c.customerEmail, ...CUSTOMER_MAIL.opened[c.language](c.ref) }, 'case_confirmation_emailed');
+      else await record(c, 'customer_email_missing');
+      await startPaging(c);
+    } else await queueUntilOpen(c, conversation);
     return c;
   }
 
   async function openHandoff(req, res) {
     let body;
     try { body = await readJson(req); } catch { json(res, 400, { error: 'bad_request' }); return; }
-    const owner = ownerOf(tokenOf(req));
+    const owner = caller(req, res);
+    if (!owner) return;
     const known = typeof body?.conversationId === 'string' ? conversations.get(body.conversationId) : undefined;
     if (known && known.owner !== owner) { json(res, 404, { error: 'not_found' }); return; }
     // A customer can ask for a person before saying anything: that starts a conversation.
@@ -266,8 +310,10 @@ export function createHandoff({ clock, audit, failedQuestions, mailer, agents, s
 
   // The customer's own conversation, or a 404 that does not say whether the id exists.
   function ownConversation(req, res, id) {
+    const owner = caller(req, res);
+    if (!owner) return null;
     const conversation = typeof id === 'string' ? conversations.get(id) : undefined;
-    if (conversation && conversation.owner === ownerOf(tokenOf(req))) return conversation;
+    if (conversation && conversation.owner === owner) return conversation;
     json(res, 404, { error: 'not_found' });
     return null;
   }
@@ -283,6 +329,34 @@ export function createHandoff({ clock, audit, failedQuestions, mailer, agents, s
     // The customer receives the agent's words; their own side is already on their screen.
     const messages = c.transcript.filter((m) => (m.from === 'agent' || m.public) && m.seq > after).map(({ seq, from, text }) => ({ seq, from, text }));
     json(res, 200, { ...view(c), messages, next: c.transcript.length });
+  }
+
+  // 'My cases' (ticket 38). The customer's own cases, found by the owner on the case, which is the owner derived from the
+  // token when the case opened. No id or owner ever comes from the request.
+  const customerState = (c) => (c.state === 'resolved' && c.closeReason === 'cancelled_by_user' ? 'cancelled' : c.state);
+  // The last time something the customer could notice happened: a state change, or a message of theirs, an agent's or a
+  // public notice. Internal system notes ("transferred from X to Y") do not count, their public twin does.
+  const updatedAtOf = (c) => Math.max(c.openedAt, c.claimedAt ?? 0, c.resolvedAt ?? 0, c.reopenedAt ?? 0, ...c.transcript.filter((m) => m.from !== 'system' || m.public).map((m) => m.at));
+  const iso = (ms) => new Date(ms).toISOString();
+  const myCaseView = (c) => ({ ref: c.ref, state: customerState(c), openedAt: iso(c.openedAt), updatedAt: iso(updatedAtOf(c)) });
+  // A closed case is listed for the retention period (measured like the purge job, so the two never disagree between runs);
+  // a case still open is live work and is always listed. An email-only case is listed as 'emailed': it has a reference and
+  // a date, but no chat and no progress to follow, and it expires like a closed case.
+  const listable = (c, owner) => c.owner === owner
+    && (c.state === 'waiting' || c.state === 'with_agent' || !retentionMs || clock.now() - lastActivity(c) <= retentionMs);
+  function myCases(req, res) {
+    const owner = caller(req, res, { verified: true });
+    if (!owner) return;
+    json(res, 200, { cases: store.all().filter((c) => listable(c, owner)).reverse().map(myCaseView) });
+  }
+  // One of the customer's own cases. An open one also names its conversation, so the widget can go back to that chat;
+  // someone else's case (or none) is the same 404.
+  function myCase(req, res, ref) {
+    const owner = caller(req, res, { verified: true });
+    if (!owner) return;
+    const c = store.get(ref);
+    if (!c || !listable(c, owner)) { json(res, 404, { error: 'not_found' }); return; }
+    json(res, 200, { ...myCaseView(c), ...(c.state === 'waiting' || c.state === 'with_agent' ? { conversationId: c.conversationId } : {}) });
   }
 
   async function cancelCase(req, res) {
@@ -555,6 +629,9 @@ export function createHandoff({ clock, audit, failedQuestions, mailer, agents, s
     const url = new URL(req.url, 'http://local');
     if (req.method === 'POST' && url.pathname === '/handoff') { await openHandoff(req, res); return true; }
     if (req.method === 'GET' && url.pathname === '/case') { customerStatus(req, res, url); return true; }
+    if (req.method === 'GET' && url.pathname === '/case/mine') { myCases(req, res); return true; }
+    const mine = req.method === 'GET' ? /^\/case\/mine\/([A-Za-z0-9-]{1,20})$/.exec(url.pathname) : null;
+    if (mine) { myCase(req, res, mine[1]); return true; }
     if (req.method === 'POST' && url.pathname === '/case/cancel') { await cancelCase(req, res); return true; }
     if (req.method === 'POST' && url.pathname === '/case/feedback') { await solvedFeedback(req, res); return true; }
     if (req.method === 'POST' && url.pathname === '/agent/login') { await agentLogin(req, res); return true; }
@@ -577,6 +654,25 @@ export function createHandoff({ clock, audit, failedQuestions, mailer, agents, s
     return false;
   }
 
+  // After a restart (ticket 62): the cases loaded from the database that are still live get their timers back, from the
+  // times stored on them. Nobody is paged again for a page already sent; a deadline already past fires at once.
+  handle.resume = () => {
+    for (const c of store.all()) {
+      if (c.state === 'waiting') {
+        if (c.afterHours) { afterHoursQueue.add(c); armAfterHours(c); }
+        else if (c.pagingStartedAt != null) armPaging(c);
+        else if (hours.isOpen(clock.now())) startPaging(c).catch(() => {}); // it was opened but never paged before the stop
+        else { c.queued = true; c.afterHours = true; afterHoursQueue.add(c); armAfterHours(c); }
+      } else if (c.state === 'with_agent') {
+        if (c.awaitingAgent) armSilence(c);
+        c.activityAt ??= c.claimedAt ?? c.openedAt;
+        armActivity(c);
+      }
+    }
+  };
+  handle.flush = () => store.flush();
+  // A conversation that began as a guest became the customer's own when their session started: so do its cases.
+  handle.adopt = (conversationId, owner) => { for (const c of store.all()) if (c.conversationId === conversationId) c.owner = owner; };
   // For drafted case messages: a reference for the email subject, and the case the customer already has open.
   handle.reserveRef = () => store.reserveRef();
   // The customer emailed support without opening a chat. The reference leads to a recorded case that nobody is paged

@@ -10,6 +10,7 @@ import { createMailer } from './mailer.js';
 import { loadRetention } from './retention.js';
 import { createHttpGateway, loadTenants } from './gateway.js';
 import { assertStartup } from './startup.js';
+import { loadSessionSecret, openDatabase } from './database.js';
 
 // Demo entry point. With MODEL_PRIMARY_* set in the environment (see
 // loadModelConfig) the real OpenAI-compatible chain is used; otherwise a
@@ -72,6 +73,27 @@ const gateway = createHttpGateway({ tenants });
 // Dev only: TEST_TOKEN and TEST_CLI (a test customer's bearer token and cli) go on the demo page so a session can start.
 const devPage = process.env.TEST_TOKEN && process.env.TEST_CLI ? { token: process.env.TEST_TOKEN, cli: process.env.TEST_CLI, portalFlag: process.env.TEST_PORTAL_FLAG === '1' } : undefined;
 if (devPage) console.warn('TEST_TOKEN/TEST_CLI set: the demo page carries a real token. Local use only.');
-createService({ allowedOrigins, devPage, model: modelConfig ? createModel(modelConfig) : scriptedModel, gateway, clock, audit, guides, navigation, scamCues, failedQuestions, outputAllowlist, limits: loadLimits(process.env), mailer, agents, support, consoleUrl, retention }).listen(port, () => {
+// Signed customer session ids (ticket 38). The signing key is SESSION_SECRET (16+ characters), or else a key made once and kept in
+// data/session-secret (owner-only), so customers stay signed in across a restart. SESSION_TTL_HOURS (default 8) is the longest
+// a session lasts; a token that expires sooner ends it sooner.
+function sessionConfig() {
+  const hours = process.env.SESSION_TTL_HOURS === undefined ? 8 : Number(process.env.SESSION_TTL_HOURS);
+  if (!Number.isFinite(hours) || hours <= 0) { console.error('SESSION_TTL_HOURS must be a positive number'); process.exit(1); }
+  try { return { sessionSecret: loadSessionSecret(process.env.SESSION_SECRET_FILE ?? 'data/session-secret'), sessionTtlMs: hours * 60 * 60_000 }; } catch (e) { console.error(e.message); process.exit(1); }
+}
+// Cases and conversations are kept in SQLite (ticket 62), by default data/assistant.db (DATABASE_FILE). The file holds only
+// text the service already keeps masked; it is git-ignored and covered by the one retention value.
+let database;
+try { database = openDatabase(process.env.DATABASE_FILE ?? 'data/assistant.db'); } catch (e) { console.error(`database: ${e.message}`); process.exit(1); }
+const server = createService({ allowedOrigins, devPage, model: modelConfig ? createModel(modelConfig) : scriptedModel, gateway, clock, audit, guides, navigation, scamCues, failedQuestions, outputAllowlist, limits: loadLimits(process.env), mailer, agents, support, consoleUrl, retention, database, ...sessionConfig() });
+server.listen(port, () => {
   console.log(`assistant demo host: http://localhost:${port}/`);
+  console.log(`storage: ${process.env.DATABASE_FILE ?? 'data/assistant.db'}`);
 });
+// A stop writes what is pending and closes the database, so nothing is lost between a change and the next write.
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.once(signal, () => {
+    server.close(() => { try { database.close(); } catch { /* already closed */ } process.exit(0); });
+    server.closeAllConnections?.();
+  });
+}

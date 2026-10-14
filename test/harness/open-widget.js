@@ -1,4 +1,5 @@
 import { JSDOM } from 'jsdom';
+import { rawFetch } from './session-fetch.js';
 
 // Loads a page (the demo host page by default, or /console) served by a running service into jsdom, running the
 // real widget script. Returns helpers to drive it like a customer would.
@@ -8,7 +9,8 @@ export async function openWidget(baseUrl, path = '/') {
     resources: 'usable',
     pretendToBeVisual: true,
     beforeParse(window) {
-      window.fetch = (url, init) => fetch(new URL(url, baseUrl), init);
+      // rawFetch: the widget itself must send the session id it was given; the test harness does not do it for it.
+      window.fetch = (url, init) => rawFetch(new URL(url, baseUrl), init);
       window.TextDecoder = TextDecoder;
       window.TextEncoder = TextEncoder;
       Object.defineProperty(window, 'crypto', { value: globalThis.crypto, configurable: true });

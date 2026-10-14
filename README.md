@@ -13,9 +13,9 @@ Standalone assistant service and chat widget for the bank's portal. Spec and tic
 
 ```sh
 npm install
-npm test               # whole automated suite (service API, widget and console in jsdom): 513 pass, 0 fail
+npm test               # whole automated suite (service API, widget and console in jsdom): 747 pass, 0 fail
 npm run check:guides   # fails if a guide exists in one language only
-npm start              # service on http://localhost:3000, demo host page on /, agent console on /console
+npm start              # needs Node 22.13 or later (built-in SQLite). Service on http://localhost:3000, demo host page on /, agent console on /console
 ```
 
 ```sh
@@ -41,6 +41,9 @@ Never put a key or token in a file in this repo. Set them in the shell that star
 | nothing | Scripted stand-in model (one canned reply), no bank session. Enough for the safety and handoff steps. |
 | `MODEL_PRIMARY_BASE_URL`, `MODEL_PRIMARY_NAME`, `MODEL_PRIMARY_API_KEY` | A real model. Groq: `https://api.groq.com/openai/v1`, `qwen/qwen3.8-27b`. Optional `MODEL_FALLBACK_*` (for example `openai/gpt-oss-120b`) and `MODEL_OFFLINE_*` (local Ollama, English only). Routing runs at temperature 0, answers at 0.3, so the same message is routed the same way. |
 | `PORT` | Default 3000. |
+| `DATABASE_FILE` | Default `data/assistant.db`. The SQLite file that keeps support cases (with transcripts, drafted message, summary, priority flag) and chat conversations, so they survive a restart. See "Storage" below. |
+| `SESSION_SECRET`, `SESSION_SECRET_FILE` | Signs the customer session ids the service issues after the gateway check (they decide whose conversations and cases a request may touch). `SESSION_SECRET` (16+ characters) wins; otherwise a key is made once and kept in `data/session-secret` (owner-only; `SESSION_SECRET_FILE` moves it), so customers stay signed in across a restart. Several instances need the same value. |
+| `SESSION_TTL_HOURS` | Optional, default 8. Longest a customer session lasts; a token with an earlier `exp` ends it sooner. |
 | `ALLOWED_ORIGINS` | Comma-separated exact origins that may call the service from a browser page, for example `http://localhost:3001` (the portal). Empty means same-origin only. A wildcard or a path is refused at start. |
 | `TEST_TOKEN`, `TEST_CLI` | Standalone demo page only: a test customer's token and cli are put on the page so a session starts against the bank's test server (`config/tenants.json`). Not used when the widget runs inside the portal. |
 | `TEST_PORTAL_FLAG=1` | Standalone demo page only: also sets the portal's `isBalancePinVerified` flags. |
@@ -95,6 +98,17 @@ Run each step in English, then in French (the reply language follows the latest 
 Timers (5 and 15 minutes to page and queue, 10 and 30 minutes of agent silence, 24 hours, 72 hours) are config values in `config/support.json`, proven by tests with a controllable clock. To see one live, set a short value in a copy of the file and start with `SUPPORT_CONFIG=path`.
 
 ## What changed since the first demo
+
+## Storage
+
+Cases and conversations are kept in one SQLite file (`data/assistant.db`, git-ignored), using Node's built-in `node:sqlite`, so there is no extra dependency. Tests and quick runs without a database keep everything in memory behind the same interface.
+
+- **What is stored.** Per case: reference, owner digest, state, transcript, drafted message, summary, priority flag, masked records, timestamps and the customer's contact email (needed to email them when an agent replies). Per conversation: owner digest, history (runs of 9+ digits are masked again on the way in), language and the last transaction reference. **Never stored:** the session (customer id, wallet, account numbers), the balance unlock, tokens, PIN or OTP, agent passwords, the session secret. A test scans the database file for the same secrets as the audit scan.
+- **At start.** Every case is loaded. For cases still waiting or with an agent, the timers are rebuilt from the times stored on the case and the clock: the 5 and 15 minute paging steps, the 10 and 30 minute silence steps, the 24 hour auto-resolve, after-hours paging at the next shift. A deadline that passed while the service was down fires at once; the others keep their original moment; a page already sent is not sent again. The 72 hour window is computed from the stored resolution time. Reference numbers continue from the highest ever used (also after a purge).
+- **Claim.** One conditional `UPDATE ... WHERE state = 'waiting' AND agent_id IS NULL`; the database decides, so two services on one file cannot both win. (One service writing to the file is the supported setup: the other in-memory copies are not kept in step.)
+- **Retention.** The existing purge job and the one retention value delete closed cases (and their messages) and idle conversations from the file. Open cases stay.
+- **After a restart.** A customer's session id stays valid (the key is persisted), "My cases" lists their cases, and an open case can be returned to. Their account session (reads, balance) is not stored: the first account question after a restart answers "session expired" (no silent retry, as before) and the widget starts the session again for the next message. Agents sign in again (their sessions are in memory). Summaries that were still being written are lost; the first claim tries again.
+- **Back up and erase.** Copy or delete the file while the service is stopped. Deleting it forgets every case and conversation (references start again from C-1001).
 
 These came out of running it against the real model, the bank's test server and the portal.
 

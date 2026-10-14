@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { json, readJson } from './http.js';
-import { ownerOf, tokenOf } from './identity.js';
+import { tokenOf } from './identity.js';
 import { maskText } from './mask.js';
 import { WARNING, shield } from './shield.js';
 import { NOTICE } from './handoff.js';
@@ -53,14 +53,16 @@ function detailLines(tx, language) {
 
 // The customer's drafted case message (ticket 31). Nothing here sends anything: a draft only becomes a case or an
 // email when the customer confirms the exact content they were shown.
-export function createDrafts({ t1, entitlementsFor, conversations, handoff, supportAddress, mailer, clock, audit }) {
+export function createDrafts({ identity, t1, entitlementsFor, conversations, handoff, supportAddress, mailer, clock, audit }) {
   const drafts = new Map(); // conversationId -> the customer's current draft
 
   async function create(req, res) {
     let body;
     try { body = await readJson(req); } catch { json(res, 400, { error: 'bad_request' }); return; }
+    const who = identity.resolve(req);
+    if (who.error) { json(res, 401, { error: who.error }); return; }
     const conversation = typeof body?.conversationId === 'string' ? conversations.get(body.conversationId) : undefined;
-    if (!conversation || conversation.owner !== ownerOf(tokenOf(req))) { json(res, 404, { error: 'not_found' }); return; }
+    if (!conversation || conversation.owner !== who.owner) { json(res, 404, { error: 'not_found' }); return; }
     const language = conversation.language;
     const entitlements = await entitlementsFor(req, body.tenant, conversation);
     const found = t1 ? await t1.caseTransaction(conversation, tokenOf(req), entitlements, body.reference ?? conversation.lastReference) : null;
@@ -75,8 +77,10 @@ export function createDrafts({ t1, entitlementsFor, conversations, handoff, supp
 
   // The customer's current draft, or null after a 404 for an id that is not theirs.
   function ownDraft(res, req, body) {
+    const who = identity.resolve(req);
+    if (who.error) { json(res, 401, { error: who.error }); return null; }
     const draft = typeof body?.conversationId === 'string' ? drafts.get(body.conversationId) : undefined;
-    if (!draft || draft.owner !== ownerOf(tokenOf(req)) || draft.id !== body.draftId) { json(res, 404, { error: 'not_found' }); return null; }
+    if (!draft || draft.owner !== who.owner || draft.id !== body.draftId) { json(res, 404, { error: 'not_found' }); return null; }
     return draft;
   }
 

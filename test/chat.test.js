@@ -61,7 +61,7 @@ test('every turn writes one audit record with the fields and without secrets', a
   assert.equal(rec.model, 'fake-model');
   assert.equal(rec.outcome, 'ok');
   assert.equal(typeof rec.latencyMs, 'number');
-  assert.match(rec.user, /^[0-9a-f]{12}$/);
+  assert.match(rec.user, /^(guest-|sub-)?[0-9a-f]{12}$/, 'a pseudonym, never the token');
   assert.ok(!JSON.stringify(rec).includes('SECRET-TOKEN-123'));
 });
 

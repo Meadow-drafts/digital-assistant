@@ -14,9 +14,10 @@ import { offeredPages, parseNavigate, routeIdForPath, stepsOf, validateProposal 
 import { offeredForms, parsePrefill, validatePrefill } from './prefill.js';
 import { GUIDE_ID, NEXT_STEP, OUTCOMES, TEXT as EXPLAIN_TEXT, parseNext } from './explain.js';
 import { MESSAGES as T1_MESSAGES, TOOL_RULES, UNLOCK_MS, createT1, parseToolCall } from './t1.js';
-import { ownerOf, subjectOf, tokenOf } from './identity.js';
+import { createIdentity, guestOwnerOf, ownerOf, subjectOf, tokenOf } from './identity.js';
 import { readJson } from './http.js';
 import { createHandoff } from './handoff.js';
+import { createConversationStore } from './conversations.js';
 import { createDrafts } from './draft.js';
 import { createAuditTrail, createFailedQuestionTrail } from './audit.js';
 import { createRetention } from './retention.js';
@@ -43,10 +44,8 @@ function send(res, event, data) {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-// Pseudonymous user id for the audit log and rate limits: a one-way digest of
-// the token's subject (or of the token itself when it has none). The token
-// itself is never stored or logged.
-const pseudonym = (req) => ownerOf(tokenOf(req));
+// Answer for a session id that is present but bad or expired (never a guest).
+const sessionExpired = (res) => res.writeHead(401, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'session_expired' }));
 
 const MAX_GUIDES = 3;
 const NO_VERIFIED_STEPS = {
@@ -100,7 +99,7 @@ const OVERVIEW_WORDS = /\b(overview|dashboard|home ?page|accueil|vue d.ensemble|
 const referencesOf = (result) => [result?.transaction?.reference, ...(result?.transactions ?? []).map((t) => t.reference)]
   .filter((r) => typeof r === 'string' && r.length >= 4);
 
-export function createService({ allowedOrigins = [], devPage, model, gateway, clock, audit: auditSink, guides, navigation, prefill, scamCues, entitlements, failedQuestions, outputAllowlist, limits, mailer, agents, support, consoleUrl, retention }) {
+export function createService({ allowedOrigins = [], devPage, model, gateway, clock, audit: auditSink, guides, navigation, prefill, scamCues, entitlements, failedQuestions, outputAllowlist, limits, mailer, agents, support, consoleUrl, retention, sessionSecret, sessionTtlMs, database }) {
   // Every audit record goes through the trail: complete fields, nothing secret-shaped stored.
   const audit = createAuditTrail({ sink: auditSink, clock });
   // Failed questions are stored masked and cut short, through one write point (the sink itself stays for the dashboard and the retention job).
@@ -108,9 +107,14 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
   const t1 = gateway ? createT1({ gateway, clock }) : null;
   const limiter = createLimiter({ clock, limits });
   const checkOutput = createOutputFilter({ allowlist: outputAllowlist, protectedTexts: PROTECTED_TEXTS });
-  const conversations = new Map();
+  // Conversations and cases are kept in memory, and also in SQLite when a database is given (ticket 62).
+  const conversations = createConversationStore({ database });
+  // Who is asking (ticket 38): the owner of everything a customer touches comes from the signed session id, never from the
+  // raw token subject. Pseudonymous user id for the audit log and rate limits: the verified owner, else the guest's.
+  const identity = createIdentity({ secret: sessionSecret, clock, ttlMs: sessionTtlMs });
+  const pseudonym = (req) => { const who = identity.resolve(req); return who.owner ?? guestOwnerOf(tokenOf(req)); };
   const handoff = createHandoff({
-    clock, audit, failedQuestions, mailer, agents, support, consoleUrl, conversations,
+    identity, database, clock, audit, failedQuestions, mailer, agents, support, consoleUrl, conversations, retentionMs: retention?.ms,
     model: model && limiter.track(model), // agent summaries spend the same global token budget
     recordsFor: async ({ conversation, req, tenant }) => (t1 && req ? t1.recentMasked(conversation, tokenOf(req), await entitlementsFor(req, tenant, conversation)) : null),
   });
@@ -156,13 +160,15 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     let body;
     try { body = await readJson(req); } catch { reply(400, { error: 'bad_request' }); return; }
     if (!t1) { reply(404, { error: 'not_available' }); return; }
-    const owner = pseudonym(req);
+    // The owner of a verified session is derived from the token the gateway is about to accept; a conversation the same
+    // token began as a guest may be taken over by it, nobody else's.
+    const owner = ownerOf(tokenOf(req));
     const known = typeof body?.conversationId === 'string' ? conversations.get(body.conversationId) : undefined;
     const record = (outcome, extra = {}) => audit.append({
       time: new Date(clock.now()).toISOString(), user: owner, tenant: typeof body?.tenant === 'string' ? body.tenant.slice(0, 40) : null,
       conversationId: known ? body.conversationId : null, userText: '', replyText: '', outcome, ...extra,
     });
-    if (known && known.owner !== owner) { await record('conversation_denied'); reply(404, { error: 'not_found' }); return; }
+    if (known && known.owner !== owner && known.owner !== guestOwnerOf(tokenOf(req))) { await record('conversation_denied'); reply(404, { error: 'not_found' }); return; }
     const started = await t1.start({ tenant: body?.tenant, token: tokenOf(req), cli: body?.cli });
     if (!started.session) {
       await record(started.code, started.reason ? { reason: started.reason } : {});
@@ -183,6 +189,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     const session = Object.freeze({ ...started.session, entitlements: Object.freeze(entitlementsFromWidget) });
     const conversationId = known ? body.conversationId : randomUUID();
     const conversation = known ?? { owner, history: [], language: 'en', asked: new Set(), session: null };
+    if (conversation.owner !== owner) { conversation.owner = owner; handoff.adopt(conversationId, owner); } // began as a guest
     conversation.lastActiveAt = clock.now();
     conversation.session = session;
     conversation.unlock = null; // a new session starts with the balance locked
@@ -191,7 +198,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
       time: new Date(clock.now()).toISOString(), user: owner, tenant: session.tenant, conversationId,
       userText: '', replyText: '', outcome: 'session_started',
     });
-    reply(200, { conversationId });
+    reply(200, { conversationId, sessionId: identity.issue(tokenOf(req)).sessionId });
   }
 
   // Balance unlock (ticket 24). Either the portal's PIN-verified flag (a client claim) or the widget's own
@@ -201,7 +208,9 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     let body;
     try { body = await readJson(req); } catch { reply(400, { error: 'bad_request' }); return; }
     if (!t1) { reply(404, { error: 'not_available' }); return; }
-    const owner = pseudonym(req);
+    const who = identity.resolve(req);
+    if (who.error) { reply(401, { error: who.error }); return; }
+    const owner = who.owner;
     const conversation = typeof body?.conversationId === 'string' ? conversations.get(body.conversationId) : undefined;
     const record = (outcome, extra = {}) => audit.append({
       time: new Date(clock.now()).toISOString(), user: owner, tenant: conversation?.session?.tenant ?? null,
@@ -237,7 +246,9 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     const message = shielded.text;
     // A conversation belongs to the customer who started it. An id the service
     // did not issue is ignored; someone else's id is refused without saying it exists.
-    const owner = pseudonym(req);
+    const who = identity.resolve(req);
+    if (who.error) { sessionExpired(res); return; }
+    const owner = who.owner;
     const known = typeof body.conversationId === 'string' ? conversations.get(body.conversationId) : undefined;
     if (known && known.owner !== owner) {
       await audit.append({
@@ -543,6 +554,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
       if (refusal) chipReasons.push('refusal');
       send(res, 'chip', chipState(chipReasons));
       history.push({ role: 'assistant', content: reply });
+      conversations.save(conversationId);
       send(res, 'done', { conversationId, language: served.offline ? 'en' : language, model: served.model, offline: Boolean(served.offline) });
     } catch (err) {
       if (err instanceof LimitError) {
@@ -582,7 +594,9 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     res.end();
   }
 
-  const drafts = createDrafts({ t1, entitlementsFor, conversations, handoff, supportAddress: support?.mail?.supportAddress, mailer, clock, audit });
+  handoff.resume(); // timers of the cases loaded from the database
+
+  const drafts = createDrafts({ identity, t1, entitlementsFor, conversations, handoff, supportAddress: support?.mail?.supportAddress, mailer, clock, audit });
 
   const server = http.createServer((req, res) => {
     const fail = () => { if (!res.headersSent) res.writeHead(500); res.end(); };
@@ -592,7 +606,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     const originAllowed = typeof origin === 'string' && allowedOrigins.includes(origin);
     if (originAllowed) {
       res.setHeader('access-control-allow-origin', origin);
-      res.setHeader('access-control-allow-headers', 'authorization, content-type');
+      res.setHeader('access-control-allow-headers', 'authorization, content-type, x-assistant-session');
       res.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS');
       res.setHeader('access-control-max-age', '600');
     }
@@ -628,6 +642,9 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     }
     res.writeHead(404).end();
   });
+  // Everything not yet written goes to the database when the server stops (and on request, for tests).
+  server.flushStorage = () => { handoff.flush(); conversations.flush(); };
+  server.on('close', server.flushStorage);
   // Retention (ticket 33): with a retention value the purge job exists, runs on the clock, and stops with the server.
   if (retention) {
     server.retention = createRetention({ clock, ms: retention.ms, audit, failedQuestions, conversations, handoff, drafts });

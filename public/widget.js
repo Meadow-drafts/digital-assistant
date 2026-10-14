@@ -12,6 +12,13 @@
 // Handoff: only a click on the human chip asks the service for a case (the host also hears
 // bank-assistant:handoff-request). The widget then shows the case banner and polls the service every poll-ms
 // (attribute, default 2000) for the case state and the agent's messages.
+// Session: with a customer id (cli) the widget starts a session once; the service answers with a signed session id,
+// which the widget sends as X-Assistant-Session on every later call, next to the bearer token. A 401 drops it and the
+// next call starts a new session. Without a customer id the chat still answers how-to questions as a guest, but
+// 'My cases' needs the session.
+// 'My cases' (a button under the title): the customer's own cases, newest first, with the state as they see it. The
+// service decides whose they are from the token alone. Selecting one shows its status and, if it is still open, a button
+// that brings that chat back (banner, agent messages and polling continue as for any open case).
 // Disputed transactions (a dispute, a wrong transfer, a reversal, a debit without credit): the chip click opens a
 // draft message for the customer to edit and review instead. Nothing is sent, and no case is opened, until the
 // customer confirms the exact content on the confirm screen.
@@ -72,6 +79,20 @@ const TEXT = {
     draftError: 'We could not prepare your message. Please try again.',
     sendError: 'Nothing was sent. Please try again.',
     caseChanged: 'Your case changed in the meantime. Nothing was sent: please review your message again.',
+    myCases: 'My cases',
+    myCasesLoading: 'Loading your cases…',
+    myCasesEmpty: 'You have no cases yet.',
+    myCasesError: 'We could not load your cases. Please try again.',
+    caseOpened: 'Opened',
+    caseUpdated: 'Last update',
+    caseStates: { waiting: 'Waiting for an agent', with_agent: 'With an agent', resolved: 'Resolved', cancelled: 'Cancelled', emailed: 'Emailed to support' },
+    caseOpenChat: 'Back to this chat',
+    caseListBack: 'Back to the list',
+    myCasesClose: 'Close',
+    caseOpenError: 'We could not open that chat. Please try again.',
+    myCasesSignIn: 'Sign in to see your cases.',
+    caseEmailed: 'Emailed to support',
+    caseEmailedNote: 'You emailed this to support. Its progress cannot be tracked here.',
   },
   fr: {
     title: 'Assistant',
@@ -129,6 +150,20 @@ const TEXT = {
     draftError: "Nous n'avons pas pu préparer votre message. Veuillez réessayer.",
     sendError: "Rien n'a été envoyé. Veuillez réessayer.",
     caseChanged: "Votre dossier a changé entre-temps. Rien n'a été envoyé : relisez votre message.",
+    myCases: 'Mes dossiers',
+    myCasesLoading: 'Chargement de vos dossiers…',
+    myCasesEmpty: "Vous n'avez pas encore de dossier.",
+    myCasesError: "Nous n'avons pas pu charger vos dossiers. Veuillez réessayer.",
+    caseOpened: 'Ouvert',
+    caseUpdated: 'Dernière mise à jour',
+    caseStates: { waiting: "En attente d'un agent", with_agent: 'Avec un agent', resolved: 'Résolu', cancelled: 'Annulé', emailed: "Envoyé par e-mail à l'assistance" },
+    caseOpenChat: 'Retour à ce chat',
+    caseListBack: 'Retour à la liste',
+    myCasesClose: 'Fermer',
+    caseOpenError: "Nous n'avons pas pu ouvrir ce chat. Veuillez réessayer.",
+    myCasesSignIn: 'Connectez-vous pour voir vos dossiers.',
+    caseEmailed: "Envoyé par e-mail à l'assistance",
+    caseEmailedNote: "Vous avez envoyé ceci par e-mail à l'assistance. Son avancement ne peut pas être suivi ici.",
   },
 };
 
@@ -153,6 +188,20 @@ class BankAssistant extends HTMLElement {
     this.innerHTML = `
       <section class="ba-root" aria-label="Assistant">
         <header data-role="title"></header>
+        <button data-role="my-cases-button" type="button"></button>
+        <section data-role="my-cases-panel" hidden>
+          <h3 data-role="my-cases-title"></h3>
+          <p data-role="my-cases-loading" aria-live="polite"></p>
+          <p data-role="my-cases-error" aria-live="polite"></p>
+          <p data-role="my-cases-empty" hidden></p>
+          <ul data-role="my-cases-list"></ul>
+          <div data-role="my-case-detail" hidden>
+            <p data-role="my-case-detail-text"></p>
+            <button data-role="my-case-open-chat" type="button" hidden></button>
+            <button data-role="my-case-back" type="button"></button>
+          </div>
+          <button data-role="my-cases-close" type="button"></button>
+        </section>
         <div data-role="case-banner" hidden>
           <strong data-role="case-state"></strong>
           <span data-role="case-ref"></span>
@@ -229,6 +278,9 @@ class BankAssistant extends HTMLElement {
     this.q('draft-back').addEventListener('click', () => this.showDraftStep('edit'));
     this.q('draft-discard').addEventListener('click', () => this.closeDraft());
     this.q('draft-skip').addEventListener('click', () => { this.closeDraft(); this.startHandoff(); });
+    this.q('my-cases-button').addEventListener('click', () => this.showMyCases());
+    this.q('my-cases-close').addEventListener('click', () => { this.q('my-cases-panel').hidden = true; });
+    this.q('my-case-back').addEventListener('click', () => this.showCaseList());
     this.q('solved-yes').addEventListener('click', () => this.answerSolved(true));
     this.q('solved-no').addEventListener('click', () => this.answerSolved(false));
     this.render();
@@ -244,6 +296,12 @@ class BankAssistant extends HTMLElement {
     this.q('pin-input').placeholder = t.pinPlaceholder;
     this.q('pin-submit').textContent = t.pinSubmit;
     this.q('human-chip').textContent = t.human;
+    this.q('my-cases-button').textContent = t.myCases;
+    this.q('my-cases-title').textContent = t.myCases;
+    this.q('my-cases-empty').textContent = t.myCasesEmpty;
+    this.q('my-case-open-chat').textContent = t.caseOpenChat;
+    this.q('my-case-back').textContent = t.caseListBack;
+    this.q('my-cases-close').textContent = t.myCasesClose;
     this.q('thinking').textContent = t.thinking;
     this.q('disclaimer').textContent = t.disclaimer;
     this.q('disclaimer').hidden = false;
@@ -299,12 +357,21 @@ class BankAssistant extends HTMLElement {
 
   token() { return this.getToken?.() ?? this.getAttribute('token') ?? ''; }
 
+  // The bearer token and, once a session has started, the signed session id the service gave us for it.
+  authHeaders(token = this.token()) {
+    return { authorization: `Bearer ${token}`, ...(this.sessionId ? { 'x-assistant-session': this.sessionId } : {}) };
+  }
+
+  // A 401 means the session id is no longer good (expired, or not ours): forget it so the next call starts a new session.
+  dropSession() { this.sessionId = null; this.sessionStarted = false; }
+
   async caseCall(method, path, body) {
     const res = await fetch(`${this.getAttribute('api') ?? ''}${path}`, {
       method,
-      headers: { ...(body ? { 'content-type': 'application/json' } : {}), authorization: `Bearer ${this.token()}` },
+      headers: { ...(body ? { 'content-type': 'application/json' } : {}), ...this.authHeaders() },
       body: body ? JSON.stringify(body) : undefined,
     });
+    if (res.status === 401) this.dropSession();
     return { ok: res.ok, status: res.status, body: await res.json().catch(() => ({})) };
   }
 
@@ -312,12 +379,102 @@ class BankAssistant extends HTMLElement {
     if (this.handoffBusy || this.caseView?.state === 'waiting' || this.caseView?.state === 'with_agent') return;
     this.handoffBusy = true;
     try {
+      await this.startSession(this.token()); // a customer with a customer id gets a verified case, even before the first message
       const res = await this.caseCall('POST', '/handoff', { conversationId: this.conversationId, tenant: this.getAttribute('tenant') });
       if (!res.ok) { this.addNote(TEXT[this.lang].handoffError); return; }
       this.conversationId = res.body.conversationId;
       this.cursor = 0;
       this.applyCase(res.body);
     } catch { this.addNote(TEXT[this.lang].handoffError); } finally { this.handoffBusy = false; }
+  }
+
+  // ---- my cases: the customer's own cases, newest first (ticket 38) ----
+
+  // Everything shown comes from the service's answer, set as text. The service decides whose cases these are.
+  async showMyCases() {
+    const t = TEXT[this.lang];
+    this.q('my-cases-panel').hidden = false;
+    this.q('my-case-detail').hidden = true;
+    this.q('my-cases-list').hidden = false;
+    this.q('my-cases-error').textContent = '';
+    this.q('my-cases-empty').hidden = true;
+    this.q('my-cases-list').replaceChildren();
+    this.q('my-cases-loading').textContent = t.myCasesLoading;
+    try {
+      await this.startSession(this.token()); // the list belongs to a verified session
+      if (!this.sessionId) { this.q('my-cases-error').textContent = t.myCasesSignIn; return; }
+      const res = await this.caseCall('GET', '/case/mine');
+      if (!res.ok || !Array.isArray(res.body.cases)) throw new Error('list');
+      this.q('my-cases-list').replaceChildren(...res.body.cases.map((c) => this.caseRow(c)));
+      this.q('my-cases-empty').hidden = res.body.cases.length > 0;
+    } catch { this.q('my-cases-error').textContent = t.myCasesError; } finally { this.q('my-cases-loading').textContent = ''; }
+  }
+
+  showCaseList() {
+    this.q('my-case-detail').hidden = true;
+    this.q('my-cases-list').hidden = false;
+  }
+
+  stamp(label, iso) {
+    const el = document.createElement('span');
+    const time = document.createElement('time');
+    time.dateTime = iso;
+    const at = new Date(iso);
+    time.textContent = Number.isNaN(at.getTime()) ? '' : at.toLocaleString(this.lang);
+    el.append(`${label}: `, time);
+    return el;
+  }
+
+  caseRow(c) {
+    const t = TEXT[this.lang];
+    const li = document.createElement('li');
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.dataset.role = 'my-case';
+    const ref = document.createElement('strong');
+    ref.textContent = String(c.ref);
+    const state = document.createElement('span');
+    state.dataset.role = 'my-case-state';
+    state.textContent = t.caseStates[c.state] ?? '';
+    // An emailed-only case has no chat to follow: say so, and show no "last update" that would suggest otherwise.
+    row.append(ref, ' ', state, ' ', this.stamp(t.caseOpened, c.openedAt));
+    if (c.state === 'emailed') { const note = document.createElement('small'); note.textContent = ` ${t.caseEmailedNote}`; row.append(note); } else row.append(' ', this.stamp(t.caseUpdated, c.updatedAt));
+    row.addEventListener('click', () => this.showCase(c.ref));
+    li.append(row);
+    return li;
+  }
+
+  async showCase(ref) {
+    const t = TEXT[this.lang];
+    this.q('my-cases-error').textContent = '';
+    try {
+      const res = await this.caseCall('GET', `/case/mine/${encodeURIComponent(ref)}`);
+      if (!res.ok) throw new Error('case');
+      const c = res.body;
+      this.q('my-case-detail-text').textContent = `${t.caseRef(c.ref)}: ${t.caseStates[c.state] ?? ''}${c.state === 'emailed' ? `. ${t.caseEmailedNote}` : ''}`;
+      // Only a case that is still open has a chat to go back to.
+      const back = this.q('my-case-open-chat');
+      back.hidden = typeof c.conversationId !== 'string';
+      back.onclick = () => this.openCaseChat(c.conversationId);
+      this.q('my-cases-list').hidden = true;
+      this.q('my-case-detail').hidden = false;
+    } catch { this.q('my-cases-error').textContent = t.myCasesError; }
+  }
+
+  // Returns to the chat of an open case: the banner, the agent's messages and the polling carry on from there.
+  async openCaseChat(conversationId) {
+    if (typeof conversationId !== 'string') return;
+    this.q('my-cases-panel').hidden = true;
+    if (conversationId === this.conversationId && this.caseView && (this.caseView.state === 'waiting' || this.caseView.state === 'with_agent')) return;
+    try {
+      const res = await this.caseCall('GET', `/case?conversationId=${encodeURIComponent(conversationId)}&after=0`);
+      if (!res.ok) throw new Error('chat');
+      if (conversationId !== this.conversationId) this.q('messages').replaceChildren();
+      this.conversationId = conversationId;
+      this.caseView = null;
+      this.cursor = 0;
+      this.applyCase(res.body);
+    } catch { this.addNote(TEXT[this.lang].caseOpenError); }
   }
 
   // ---- drafted case message: edit, review the exact content, confirm ----
@@ -759,7 +916,9 @@ class BankAssistant extends HTMLElement {
         body: JSON.stringify({ cli, tenant: this.getAttribute('tenant'), gating, conversationId: this.conversationId }),
       });
       if (!res.ok) return;
-      this.conversationId = (await res.json()).conversationId;
+      const started = await res.json();
+      this.conversationId = started.conversationId;
+      this.sessionId = typeof started.sessionId === 'string' ? started.sessionId : null;
       this.sessionStarted = true;
     } catch { return; /* how-to help still works */ }
     await this.claimPortalFlag(token); // a balance request then needs no PIN prompt
@@ -783,9 +942,10 @@ class BankAssistant extends HTMLElement {
   async unlock(token, payload) {
     const res = await fetch(`${this.getAttribute('api') ?? ''}/unlock`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      headers: { 'content-type': 'application/json', ...this.authHeaders(token) },
       body: JSON.stringify({ conversationId: this.conversationId, ...payload }),
     });
+    if (res.status === 401) this.dropSession();
     return { ok: res.ok, status: res.status, body: await res.json().catch(() => ({})) };
   }
 
@@ -840,14 +1000,16 @@ class BankAssistant extends HTMLElement {
     let bubble = null;
     let guides = [];
     let automated = false;
+    let expired = false;
     try {
       const token = this.getToken?.() ?? this.getAttribute('token') ?? '';
       await this.startSession(token);
       const res = await fetch(`${this.getAttribute('api') ?? ''}/chat`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        headers: { 'content-type': 'application/json', ...this.authHeaders(token) },
         body: JSON.stringify({ message, conversationId: this.conversationId, tenant: this.getAttribute('tenant') }),
       });
+      if (res.status === 401) { this.dropSession(); expired = true; } // no silent retry: the next message starts a new session
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
       for await (const ev of readEvents(res.body)) {
         if (ev.type === 'case') {
@@ -875,7 +1037,7 @@ class BankAssistant extends HTMLElement {
         } else if (ev.type === 'tool' && Array.isArray(ev.display?.transactions) && ev.display.transactions.length) {
           this.addTransactions(ev.display.transactions, ev.language);
         } else if (ev.type === 'tool_blocked') {
-          if (ev.code === 'session_expired') this.sessionStarted = false;
+          if (ev.code === 'session_expired') this.dropSession();
           if (ev.code === 'pin_required') pinNeeded = true;
         } else if (ev.type === 'guides') {
           guides = ev.guides;
@@ -889,7 +1051,7 @@ class BankAssistant extends HTMLElement {
       }
     } catch {
       const target = bubble ?? this.addMessage('assistant');
-      if (!target.textContent) target.textContent = TEXT[this.lang].error;
+      if (!target.textContent) target.textContent = expired ? TEXT[this.lang].pinExpired : TEXT[this.lang].error;
     } finally {
       this.q('thinking').hidden = true;
       this.busy = false;

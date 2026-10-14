@@ -88,7 +88,7 @@ test('confirming a chat draft opens the handoff with the draft as its opening me
   const aline = await agentLogin(svc.baseUrl, 'aline');
   const opened = (await aline.open(shown.ref)).body;
   assert.deepEqual({ from: opened.transcript[0].from, text: opened.transcript[0].text }, { from: 'customer', text: shown.chat.text }, 'the first message of the case is the confirmed draft, word for word');
-  assert.deepEqual(svc.mailer.outbox.map((m) => m.to), ['aline@bank.test'], 'only the on-call page, nothing to the support address');
+  assert.deepEqual(svc.mailer.outbox.map((m) => m.to), ['237690000111@mail.test', 'aline@bank.test'], 'the customer\'s confirmation (ticket 38) and the on-call page, nothing to the support address');
   assert.doesNotMatch(JSON.stringify(svc.mailer.outbox), /wrong person|15000|REF-0001/);
 });
 
@@ -126,7 +126,7 @@ test('"both" opens the handoff and emails support under the same case reference,
   assert.match(supportMail[0].subject, new RegExp(`^\\[${res.body.ref}\\]`));
   const aline = await agentLogin(svc.baseUrl, 'aline');
   assert.equal((await aline.open(shown.ref)).body.transcript[0].text, shown.chat.text);
-  assert.deepEqual(svc.mailer.outbox.filter((m) => m.to !== SUPPORT_TO).map((m) => m.to), ['aline@bank.test'], 'the agent page still goes out, without content');
+  assert.deepEqual(svc.mailer.outbox.filter((m) => m.to !== SUPPORT_TO).map((m) => m.to), ['237690000111@mail.test', 'aline@bank.test'], 'the customer\'s confirmation (ticket 38) and the agent page still go out, without content');
 });
 
 test('the email never carries a full account number, phone number or the counterparty\'s name, even when the customer typed them', async (t) => {
