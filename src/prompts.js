@@ -5,7 +5,7 @@ export const UNSUPPORTED_ID = 'unsupported';
 const REFUSAL_TAGS = '[[refusal:execute]], [[refusal:approve_validate]], [[refusal:other_user_data]], [[refusal:pin_otp]] or [[refusal:off_topic]]';
 
 const ROUTER_RULES = 'Pick the guides needed to answer the latest user question about a banking portal. ' +
-  'Reply with ONLY a JSON array of up to 3 guide ids from the list, or [] if none fit. ' +
+  'Reply with ONLY a JSON array of up to 3 guide ids from the list, or [] if none fit. If the request has two or three plausible meanings that need materially different steps, reply instead with JSON object {"clarify":[guide ids]}; only do this when the user really has not specified which meaning. Never clarify a request that clearly matches one guide. ' +
   'Asking to be taken to, or shown where to find, a portal page ("take me to my history", "open the transfer page") is NOT a request to execute anything: pick the guide for that page. ' +
   'A request to do a portal task, in any wording and with or without values ("I want to send money", "pay my electricity", "send 5000 to 2376..."), is a how-to request, NOT a request to execute: pick the guide for that task. ' +
   'Refuse as execute only when they ask you to complete, confirm, approve or validate it yourself ("do it for me", "confirm my transfer", "approve it"). ' +

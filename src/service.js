@@ -20,6 +20,7 @@ import { createDrafts } from './draft.js';
 import { createAuditTrail, createFailedQuestionTrail } from './audit.js';
 import { createRetention } from './retention.js';
 import { asksAboutCurrentPage, verifiedPageContext } from './page-context.js';
+import { commonVerifiedStep } from './guides.js';
 
 const PUBLIC = new URL('../public/', import.meta.url);
 // Only these files are served; no user-controlled path ever reaches the disk.
@@ -77,6 +78,13 @@ async function routeGuides({ model, language, available, guides, history, tools,
   }
   const raw = await collect(model.chat({ purpose: 'route', messages: routerMessages(index, history, { tools, retry, page }), language }));
   const routed = parseRefusal(raw);
+  let decoded;
+  try { decoded = JSON.parse(raw); } catch { /* keep the legacy array parser below */ }
+  if (decoded && !Array.isArray(decoded) && Array.isArray(decoded.clarify)) {
+    const eligible = new Set(available.map((guide) => guide.id));
+    const clarify = [...new Set(decoded.clarify.filter((id) => typeof id === 'string' && eligible.has(id)))].slice(0, 3);
+    return { picks: [], refusal: null, clarification: clarify, ambiguous: true };
+  }
   // The model's own tool tag (with its arguments) wins. A plain own-data question (balance, recent transactions,
   // fees and limits) is otherwise decided by rules, even over a model refusal: the model has seen earlier replies
   // that mention a PIN and can wrongly refuse it as a PIN request. The rules are narrow (short, own data, no
@@ -92,7 +100,7 @@ async function routeGuides({ model, language, available, guides, history, tools,
   // Features the portal does not offer are decided by rules too: the model kept picking the nearest real guide.
   if (guides.unsupported && asksForUnavailable(history.at(-1)?.content)) return { picks: [UNSUPPORTED_ID], refusal: null };
   let picks = [];
-  try { picks = JSON.parse(/\[[\s\S]*?\]/.exec(raw)?.[0] ?? '[]'); } catch { /* unparseable means no guide */ }
+  try { picks = Array.isArray(decoded) ? decoded : JSON.parse(/\[[\s\S]*?\]/.exec(raw)?.[0] ?? '[]'); } catch { /* unparseable means no guide */ }
   const allowed = new Set(index.map((i) => i.id));
   return { picks: [...new Set(picks)].filter((id) => allowed.has(id)).slice(0, MAX_GUIDES), refusal: null };
 }
@@ -104,6 +112,9 @@ const OVERVIEW_WORDS = /\b(overview|dashboard|home ?page|accueil|vue d.ensemble|
 // the output filter, so the filter ignores exactly these strings.
 const referencesOf = (result) => [result?.transaction?.reference, ...(result?.transactions ?? []).map((t) => t.reference)]
   .filter((r) => typeof r === 'string' && r.length >= 4);
+
+const normalizeChoiceText = (text, language) => text.toLocaleLowerCase(language)
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
 export function createService({ allowedOrigins = [], devPage, model, gateway, clock, audit: auditSink, guides, navigation, scamCues, entitlements, failedQuestions, outputAllowlist, limits, mailer, agents, support, consoleUrl, retention, sessionSecret, sessionTtlMs, database }) {
   // Every audit record goes through the trail: complete fields, nothing secret-shaped stored.
@@ -365,6 +376,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     if (key && conversation.asked.has(key)) chipReasons.push('repeated_question');
     if (key) conversation.asked.add(key);
     conversation.language = language;
+    const pendingClarification = conversation.pendingClarification ?? null;
     history.push({ role: 'user', content: message });
     conversations.set(conversationId, conversation);
 
@@ -511,15 +523,42 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
         const ent = await entitlementsFor(req, body.tenant, conversation);
         const available = guides.availableFor(ent);
         const page = verifiedPageContext(body.pageContext, { navigation, availableGuides: available, language, now: clock.now() });
-        let routed = await routeGuides({ model: turnModel, language, available, guides, history, tools: t1 ? TOOL_RULES : '', page });
+        const selected = pendingClarification?.guideIds
+          .map((id) => available.find((guide) => guide.id === id))
+          .find((guide) => guide && normalizeChoiceText(guide[language].title, language) === normalizeChoiceText(message, language));
+        let routed = selected
+          ? { picks: [selected.id], refusal: null }
+          : await routeGuides({ model: turnModel, language, available, guides, history, tools: t1 ? TOOL_RULES : '', page });
+        let askClarification = false;
+        if (routed.ambiguous) {
+          if (pendingClarification) {
+            // One follow-up is the limit; a second unresolved response can use only an exact shared guide step.
+            conversation.pendingClarification = null;
+            const candidates = pendingClarification.guideIds.map((id) => available.find((guide) => guide.id === id)).filter(Boolean);
+            const common = candidates.length === pendingClarification.guideIds.length ? commonVerifiedStep(candidates, language) : null;
+            routed = { picks: [], refusal: null, ...(common ? { commonGuidance: common, commonGuideIds: candidates.map((guide) => guide.id) } : {}) };
+          } else if (routed.clarification.length >= 2) {
+            askClarification = true;
+            conversation.pendingClarification = { guideIds: routed.clarification };
+          }
+        } else if (pendingClarification) conversation.pendingClarification = null;
         // "I want to send money" is a how-to question, not a request to execute. If the router refused it as execute and
         // the customer did not ask the assistant to complete or approve anything, ask once more with a reminder.
-        if (routed.refusal === 'execute' && !asksToComplete(message)) {
+        if (!askClarification && routed.refusal === 'execute' && !asksToComplete(message)) {
           routed = await routeGuides({ model: turnModel, language, available, guides, history, tools: t1 ? TOOL_RULES : '', retry: true, page });
         }
         const { picks } = routed;
         refusal = routed.refusal;
-        if (routed.tool) {
+        if (askClarification) {
+          const question = language === 'fr' ? 'Vous cherchez des informations sur quel sujet ?' : 'What would you like help with?';
+          const options = conversation.pendingClarification.guideIds
+            .map((id) => available.find((guide) => guide.id === id))
+            .filter(Boolean)
+            .map((guide) => guide[language].title);
+          reply = question;
+          send(res, 'guides', { guides: [] });
+          send(res, 'clarification', { question, options });
+        } else if (routed.tool) {
           // Without a gateway there is no session to read from: the customer is told to sign in, never that no guide matched.
           const done = t1 ? await t1.run({ call: routed.tool, conversation, token: tokenOf(req), entitlements: ent }) : { kind: 'fixed', code: 'session_expired', name: routed.tool.name };
           if (done.kind === 'data') {
@@ -548,7 +587,15 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
           const used = picks.filter((id) => id !== UNSUPPORTED_ID).map((id) => guides.get(id));
           guideIds = used.map((g) => g.id);
           send(res, 'guides', { guides: used.map((g) => ({ id: g.id, title: g[language].title })) });
-          if (picks.length === 0 && !refusal) {
+          if (picks.length === 0 && routed.commonGuidance && !refusal) {
+            guideIds = routed.commonGuideIds;
+            send(res, 'guides', { guides: routed.commonGuideIds.map((id) => guides.get(id)).filter(Boolean).map((guide) => ({ id: guide.id, title: guide[language].title })) });
+            const text = language === 'fr'
+              ? `Un point commun à ces options :\n\n- ${routed.commonGuidance}`
+              : `One step shared by these options:\n\n- ${routed.commonGuidance}`;
+            reply += text;
+            send(res, 'delta', { text });
+          } else if (picks.length === 0 && !refusal) {
             chipReasons.push('no_guide_hit');
             reply += NO_VERIFIED_STEPS[language];
             send(res, 'delta', { text: NO_VERIFIED_STEPS[language] });

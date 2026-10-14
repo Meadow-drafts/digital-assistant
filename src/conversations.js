@@ -21,6 +21,7 @@ export function createConversationStore({ database = null } = {}) {
     language: conversation.language,
     asked: [...conversation.asked].map(maskText),
     feedback: (conversation.feedback ?? []).map(({ answerId, rating, at }) => ({ answerId, rating, at })),
+    ...(conversation.pendingClarification ? { pendingClarification: conversation.pendingClarification } : {}),
     ...(conversation.lastReference === undefined ? {} : { lastReference: conversation.lastReference }),
   });
 
@@ -53,6 +54,7 @@ export function createConversationStore({ database = null } = {}) {
       map.set(row.id, {
         owner: row.owner, history: stored.history, language: stored.language, asked: new Set(stored.asked), feedback: stored.feedback ?? [], session: null,
         lastActiveAt: row.last_active_at, ...(stored.lastReference === undefined ? {} : { lastReference: stored.lastReference }),
+        ...(stored.pendingClarification ? { pendingClarification: stored.pendingClarification } : {}),
       });
     }
   }
