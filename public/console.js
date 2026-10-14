@@ -107,10 +107,12 @@ function renderThresholds(t) {
 function renderQueue(cases) {
   const queue = $('queue');
   const status = $('queue-status').value;
+  const detailedStatus = $('queue-status-detail').value;
   const language = $('queue-language').value;
   const search = $('queue-search').value.trim().toLowerCase();
   const visible = cases.filter((c) => {
-    const statusMatches = status === 'active' ? c.state !== 'resolved' : c.state === status;
+    const statusMatches = (status === 'active' ? c.state !== 'resolved' : status === 'all' || c.state === status)
+      && (detailedStatus === 'all' || c.state === detailedStatus);
     const languageMatches = language === 'all' || c.language === language;
     return statusMatches && languageMatches && (!search || c.ref.toLowerCase().includes(search));
   });
@@ -122,6 +124,9 @@ function renderQueue(cases) {
     if (c.ref === selected) b.setAttribute('aria-current', 'true');
     if (c.waitLevel) b.dataset.level = c.waitLevel;
     const ref = document.createElement('span'); ref.className = 'case-ref'; ref.textContent = c.ref;
+    const age = document.createElement('span'); age.className = 'case-age';
+    const ageSeconds = Math.max(0, Math.floor((Date.now() - Date.parse(c.openedAt)) / 1000));
+    age.textContent = Number.isFinite(ageSeconds) ? ageSeconds < 3600 ? `${Math.floor(ageSeconds / 60)} min ago` : ageSeconds < 86400 ? `${Math.floor(ageSeconds / 3600)} h ago` : `${Math.floor(ageSeconds / 86400)} d ago` : '';
     const state = document.createElement('span'); state.className = `pill ${c.state === 'waiting' ? 'waiting' : c.state === 'with_agent' ? 'assigned' : ''}`; state.textContent = label(c);
     const summary = document.createElement('span'); summary.className = 'case-summary';
     summary.textContent = c.queueSummary
@@ -129,11 +134,11 @@ function renderQueue(cases) {
       : c.priority ? 'Priority case · wrong transfer' : 'No case summary available';
     const wait = document.createElement('span'); wait.className = 'case-wait';
     wait.textContent = c.waitingSeconds === null ? (c.priority ? 'Priority' : '') : `waiting ${clock(c.waitingSeconds)}${c.waitingFor === 'reply' ? ' for a reply' : ''}${SLOW[c.waitLevel] ?? ''}`;
-    b.append(ref, state, summary, wait);
+    b.append(ref, age, summary, state, wait);
     b.addEventListener('click', () => { if (selected !== c.ref) clearSuggestions(); shownLines = ''; openCase(c.ref); refresh(); });
     return b;
   }));
-  $('queue-count').textContent = `${visible.length} ${visible.length === 1 ? 'case' : 'cases'}`;
+  $('queue-count').textContent = String(visible.length);
   $('queue-empty').hidden = visible.length > 0;
   $('queue-empty').textContent = visible.length ? '' : cases.length ? 'No cases match these filters.' : 'No active cases.';
 }
@@ -306,6 +311,7 @@ $('inbox-open').addEventListener('click', () => showPage('inbox'));
 $('back-to-queue').addEventListener('click', backToQueue);
 $('queue-search').addEventListener('input', () => refresh());
 $('queue-status').addEventListener('change', () => refresh());
+$('queue-status-detail').addEventListener('change', () => refresh());
 $('queue-language').addEventListener('change', () => refresh());
 
 // Audit log reader (authorised staff only; the service refuses everyone else). Read only, set as text.
@@ -339,11 +345,18 @@ async function loadAudit() {
   body.append(...res.body.records.map((r) => {
     const row = document.createElement('tr');
     row.dataset.role = 'audit-row';
-    for (const text of [r.time, r.user ?? '', r.outcome ?? '', r.conversationId ?? '', detail(r)]) {
+    row.className = 'audit-row';
+    [r.time, r.user ?? '', r.outcome ?? '', r.conversationId ?? '', detail(r)].forEach((text, index) => {
       const cell = document.createElement('td');
-      cell.textContent = text;
+      if (index === 2) {
+        const outcome = document.createElement('span');
+        outcome.className = 'outcome-pill';
+        outcome.dataset.outcome = text;
+        outcome.textContent = text;
+        cell.append(outcome);
+      } else cell.textContent = text;
       row.append(cell);
-    }
+    });
     return row;
   }));
   table.append(head, body);
@@ -371,21 +384,20 @@ $('audit-form').addEventListener('submit', (e) => { e.preventDefault(); loadAudi
 
 // Staff dashboard (same staff as the audit log). Counts and percentages, set as text; the service sends no personal data.
 const figureText = (f) => (f.percent === null ? `0 of ${f.of}` : `${f.count} of ${f.of} (${f.percent}%)`);
-function rows(into, items, label) {
-  into.replaceChildren(...items.map((item) => {
-    const row = document.createElement('div');
-    row.textContent = label(item);
-    return row;
-  }));
-  if (!items.length) into.textContent = 'Nothing in this range.';
-}
 async function loadDashboard() {
   $('dashboard-error').textContent = '';
   const query = new URLSearchParams();
   for (const [name, role] of [['from', 'dashboard-from'], ['to', 'dashboard-to'], ['language', 'dashboard-language']]) {
     if ($(role).value.trim()) query.set(name, $(role).value.trim());
   }
-  const res = await api('GET', `/agent/dashboard${query.size ? `?${query}` : ''}`);
+  const language = $('dashboard-language').value;
+  const languages = language === 'all' ? ['en', 'fr'] : [];
+  const requests = [api('GET', `/agent/dashboard${query.size ? `?${query}` : ''}`), ...languages.map((lang) => {
+    const languageQuery = new URLSearchParams(query);
+    languageQuery.set('language', lang);
+    return api('GET', `/agent/dashboard?${languageQuery}`);
+  })];
+  const [res, ...coverage] = await Promise.all(requests);
   if (!res.ok) { $('dashboard-error').textContent = res.status === 403 ? 'You are not authorised to read the dashboard.' : 'Could not load the dashboard.'; return; }
   const d = res.body;
   $('dashboard-conversations').textContent = String(d.conversations.count);
@@ -393,22 +405,42 @@ async function loadDashboard() {
   $('dashboard-resolved').textContent = figureText(d.assistantResolved);
   $('dashboard-unresolved-count').textContent = String(d.unresolved.length);
   $('dashboard-note').textContent = d.conversations.small ? `Small number: these figures come from fewer than ${d.smallNumberBelow} conversations, so read them with care.` : '';
-  const small = (item) => (item.small ? ` (fewer than ${d.smallNumberBelow} conversations)` : '');
+  const languagePanel = $('dashboard-languages');
+  const coverageRows = language === 'all' ? coverage.map((result, index) => ({ language: ['English', 'French'][index], data: result.body })) : [{ language: language === 'en' ? 'English' : 'French', data: d }];
+  const coverageTotal = coverageRows.reduce((total, row) => total + (row.data?.conversations?.count ?? 0), 0);
+  languagePanel.replaceChildren(...coverageRows.filter((row) => row.data?.conversations).map((row) => {
+    const card = document.createElement('article');
+    card.className = 'language-card';
+    const title = document.createElement('strong'); title.textContent = row.language;
+    const count = document.createElement('strong'); count.textContent = String(row.data.conversations.count);
+    const share = document.createElement('span'); share.className = 'note small';
+    share.textContent = `${coverageTotal ? Math.round(row.data.conversations.count / coverageTotal * 100) : 0}% of conversations`;
+    card.append(title, count, share);
+    return card;
+  }));
+  const below = coverageRows.some((row) => row.data?.conversations?.small);
+  $('dashboard-language-note').textContent = below ? `Small-sample notice appears whenever counts are below the configured threshold of ${d.smallNumberBelow}.` : 'Language totals use the selected period and the service’s conversation language definition.';
   const top = $('dashboard-top');
   const largest = Math.max(1, ...d.topQuestions.map((q) => q.turns));
   top.replaceChildren(...d.topQuestions.map((q) => {
     const item = document.createElement('div');
-    const label = document.createElement('span');
-    label.textContent = `${q.kind} ${q.id}: ${q.turns} questions in ${q.conversations} conversations${small(q)}`;
-    const bar = document.createElement('progress');
-    bar.max = largest;
-    bar.value = q.turns;
-    bar.setAttribute('aria-label', `${q.id}: ${q.turns} answered questions`);
-    item.append(label, bar);
+    item.className = 'topic-row';
+    const name = document.createElement('span'); name.className = 'topic-name'; name.textContent = q.id;
+    const bar = document.createElement('span'); bar.className = 'topic-bar'; bar.setAttribute('role', 'img'); bar.setAttribute('aria-label', `${q.id}: ${q.turns} answered questions`);
+    const fill = document.createElement('span'); fill.style.width = `${Math.max(0, Math.min(100, q.turns / largest * 100))}%`; bar.append(fill);
+    const count = document.createElement('span'); count.className = 'topic-count'; count.textContent = String(q.turns);
+    item.append(name, bar, count);
     return item;
   }));
   if (!d.topQuestions.length) top.textContent = 'Nothing in this range.';
-  rows($('dashboard-unresolved'), d.unresolved, (u) => `${u.text} [${u.language}]: ${u.count} times in ${u.conversations} conversations${small(u)}`);
+  const unresolved = $('dashboard-unresolved');
+  unresolved.replaceChildren(...d.unresolved.map((u) => {
+    const item = document.createElement('div'); item.className = 'unresolved-row';
+    const text = document.createElement('span'); text.textContent = `“${u.text}…”`;
+    const count = document.createElement('strong'); count.textContent = String(u.count);
+    item.append(text, count); return item;
+  }));
+  if (!d.unresolved.length) unresolved.textContent = 'Nothing in this range.';
 }
 $('dashboard-open').addEventListener('click', () => { showPage('dashboard'); loadDashboard(); });
 $('dashboard-form').addEventListener('submit', (e) => { e.preventDefault(); loadDashboard(); });
