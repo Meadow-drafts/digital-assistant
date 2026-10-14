@@ -196,7 +196,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     };
     const session = Object.freeze({ ...started.session, entitlements: Object.freeze(entitlementsFromWidget) });
     const conversationId = known ? body.conversationId : randomUUID();
-    const conversation = known ?? { owner, history: [], language: 'en', asked: new Set(), session: null };
+    const conversation = known ?? { owner, history: [], language: 'en', asked: new Set(), feedback: [], session: null };
     if (conversation.owner !== owner) { conversation.owner = owner; handoff.adopt(conversationId, owner); } // began as a guest
     conversation.lastActiveAt = clock.now();
     conversation.session = session;
@@ -242,6 +242,34 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     if (t1.unlockWithPortalFlag(conversation, body.portalFlag)) { await record('balance_unlocked_flag'); reply(200, granted); return; }
     await record('unlock_flag_not_valid', { toolReason: t1.portalFlagProblem(conversation, body.portalFlag) });
     reply(403, { error: 'flag_not_valid' });
+  }
+
+  // Answer feedback is a small enum tied to an assistant answer in the owner's own conversation. Never accept
+  // free text here: it could contain a PIN, OTP, account number or other material outside the feedback signal.
+  async function handleAnswerFeedback(req, res) {
+    const reply = (status, payload) => res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(payload));
+    let body;
+    try { body = await readJson(req); } catch { reply(400, { error: 'bad_request' }); return; }
+    const who = identity.resolve(req);
+    if (who.error) { reply(401, { error: who.error }); return; }
+    const conversation = typeof body?.conversationId === 'string' ? conversations.get(body.conversationId) : undefined;
+    if (!conversation || conversation.owner !== who.owner) { reply(404, { error: 'not_found' }); return; }
+    const answerId = typeof body.answerId === 'string' && body.answerId.length <= 64 ? body.answerId : '';
+    const rating = body.rating;
+    if (!answerId || !['up', 'down'].includes(rating)
+      || !conversation.history.some((message) => message.role === 'assistant' && message.id === answerId)) {
+      reply(404, { error: 'not_found' }); return;
+    }
+    const at = new Date(clock.now()).toISOString();
+    conversation.feedback ??= [];
+    const feedback = { answerId, rating, at };
+    const existing = conversation.feedback.findIndex((item) => item.answerId === answerId);
+    if (existing < 0) conversation.feedback.push(feedback);
+    else conversation.feedback[existing] = feedback;
+    conversations.save(body.conversationId);
+    await audit.append({ time: at, user: who.owner, tenant: conversation.session?.tenant ?? null,
+      conversationId: body.conversationId, userText: '', replyText: '', outcome: 'answer_feedback', answerId, rating });
+    reply(200, { ok: true });
   }
 
   // Turns by owner and message id, so a retry after a dropped connection gets the same reply instead of a second run
@@ -546,9 +574,10 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
       if (refusal) send(res, 'refusal', { category: refusal, card: refusalCard(refusal, language) });
       if (refusal) chipReasons.push('refusal');
       send(res, 'chip', chipState(chipReasons));
-      history.push({ role: 'assistant', content: reply });
+      const answerId = randomUUID();
+      history.push({ role: 'assistant', content: reply, id: answerId });
       conversations.save(conversationId);
-      send(res, 'done', { conversationId, language: served.offline ? 'en' : language, model: served.model, offline: Boolean(served.offline) });
+      send(res, 'done', { conversationId, answerId, language: served.offline ? 'en' : language, model: served.model, offline: Boolean(served.offline) });
     } catch (err) {
       if (err instanceof LimitError) {
         limited = err.limit;
@@ -622,6 +651,10 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     }
     if (req.method === 'POST' && req.url === '/session') {
       handleSession(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end(); });
+      return;
+    }
+    if (req.method === 'POST' && req.url === '/feedback') {
+      handleAnswerFeedback(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end(); });
       return;
     }
     const file = req.method === 'GET' ? STATIC[req.url.split('?')[0]] : undefined;

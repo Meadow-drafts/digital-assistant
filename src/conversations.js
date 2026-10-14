@@ -17,9 +17,10 @@ export function createConversationStore({ database = null } = {}) {
   let upsert = null;
 
   const data = (conversation) => JSON.stringify({
-    history: conversation.history.map((m) => ({ role: m.role, content: maskText(m.content) })),
+    history: conversation.history.map((m) => ({ role: m.role, content: maskText(m.content), ...(m.id ? { id: m.id } : {}) })),
     language: conversation.language,
     asked: [...conversation.asked].map(maskText),
+    feedback: (conversation.feedback ?? []).map(({ answerId, rating, at }) => ({ answerId, rating, at })),
     ...(conversation.lastReference === undefined ? {} : { lastReference: conversation.lastReference }),
   });
 
@@ -50,7 +51,7 @@ export function createConversationStore({ database = null } = {}) {
     for (const row of db.prepare('SELECT * FROM conversations ORDER BY rowid').all()) {
       const stored = JSON.parse(row.data);
       map.set(row.id, {
-        owner: row.owner, history: stored.history, language: stored.language, asked: new Set(stored.asked), session: null,
+        owner: row.owner, history: stored.history, language: stored.language, asked: new Set(stored.asked), feedback: stored.feedback ?? [], session: null,
         lastActiveAt: row.last_active_at, ...(stored.lastReference === undefined ? {} : { lastReference: stored.lastReference }),
       });
     }

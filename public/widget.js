@@ -47,10 +47,12 @@ const TEXT = {
     cancel: 'Cancel',
     humanBadge: 'human agent',
     automated: 'Automated reply',
-    agentJoined: (name) => `${name} (human agent) joined. The assistant is now muted.`,
     cancelled: (ref) => `Case ${ref} closed: cancelled by you. Back to the assistant.`,
-    resolved: (ref) => `Case ${ref} resolved.`,
     solvedQ: 'Was this solved?',
+    rateAnswer: 'Rate this answer',
+    thumbsUp: 'Helpful',
+    thumbsDown: 'Not helpful',
+    feedbackSaved: 'Thank you for your feedback.',
     noAccount: 'The assistant is not connected to your account (no customer id was found for this sign-in), so links to your pages and your account data are not available. Try signing in again.',
     tx: { date: 'Date', id: 'Id', from: 'From', to: 'To', member: 'Member', nature: 'Nature', type: 'Type', amount: 'Amount', status: 'Status',
       emission: 'Emission', acquisition: 'Acquisition', success: 'Completed', failed: 'Failed', pending: 'Pending', unknown: 'Pending' },
@@ -118,10 +120,12 @@ const TEXT = {
     cancel: 'Annuler',
     humanBadge: 'agent humain',
     automated: 'Réponse automatique',
-    agentJoined: (name) => `${name} (agent humain) a rejoint la conversation. L'assistant est maintenant en sourdine.`,
     cancelled: (ref) => `Dossier ${ref} fermé : annulé par vous. Retour à l'assistant.`,
-    resolved: (ref) => `Dossier ${ref} résolu.`,
     solvedQ: 'Cela a-t-il résolu votre problème ?',
+    rateAnswer: 'Évaluer cette réponse',
+    thumbsUp: 'Utile',
+    thumbsDown: 'Pas utile',
+    feedbackSaved: 'Merci pour votre avis.',
     noAccount: "L'assistant n'est pas connecté à votre compte (aucun identifiant client trouvé pour cette connexion) : les liens vers vos pages et vos données de compte ne sont pas disponibles. Essayez de vous reconnecter.",
     tx: { date: 'Date', id: 'Id', from: 'De', to: 'Vers', member: 'Membre', nature: 'Nature', type: 'Type', amount: 'Montant', status: 'Statut',
       emission: 'Émission', acquisition: 'Acquisition', success: 'Terminé', failed: 'Échoué', pending: 'En attente', unknown: 'En attente' },
@@ -397,6 +401,39 @@ class BankAssistant extends HTMLElement {
     this.q('messages').appendChild(el);
   }
 
+  attachAnswerFeedback(message, answerId) {
+    if (!message || typeof answerId !== 'string' || !answerId) return;
+    message.dataset.answerId = answerId;
+    const t = TEXT[this.lang];
+    const controls = document.createElement('div');
+    controls.dataset.role = 'answer-feedback';
+    controls.dataset.answerId = answerId;
+    const label = document.createElement('span');
+    label.textContent = t.rateAnswer;
+    controls.append(label);
+    for (const [rating, text] of [['up', t.thumbsUp], ['down', t.thumbsDown]]) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.role = rating === 'up' ? 'thumbs-up' : 'thumbs-down';
+      button.setAttribute('aria-label', text);
+      button.textContent = rating === 'up' ? '👍' : '👎';
+      button.addEventListener('click', async () => {
+        if (button.disabled) return;
+        controls.querySelectorAll('button').forEach((item) => { item.disabled = true; });
+        try {
+          const res = await this.caseCall('POST', '/feedback', { conversationId: this.conversationId, answerId, rating });
+          if (!res.ok) throw new Error('feedback');
+          label.textContent = t.feedbackSaved;
+        } catch {
+          label.textContent = t.rateAnswer;
+          controls.querySelectorAll('button').forEach((item) => { item.disabled = false; });
+        }
+      });
+      controls.append(button);
+    }
+    message.parentNode.insertBefore(controls, message.nextSibling);
+  }
+
   token() { return this.getToken?.() ?? this.getAttribute('token') ?? ''; }
 
   // The bearer token and, once a session has started, the signed session id the service gave us for it.
@@ -637,15 +674,10 @@ class BankAssistant extends HTMLElement {
 
   // Takes a case view from the service: the banner, the agent's new messages, and what to poll next.
   applyCase(view) {
-    const before = this.caseView?.state ?? 'bot';
     this.caseView = view;
     for (const m of view.messages ?? []) { if (m.from === 'system') this.addNote(m.text); else this.addMessage('agent', m.text); }
     if (Number.isInteger(view.next)) this.cursor = view.next;
-    if (view.state === 'with_agent' && before !== 'with_agent') this.addNote(TEXT[this.lang].agentJoined(view.agent?.firstName ?? ''));
-    if (view.state === 'resolved' && before !== 'resolved') {
-      this.addNote(TEXT[this.lang].resolved(view.ref));
-      this.q('solved-prompt').hidden = view.askSolved !== true;
-    }
+    if (view.state === 'resolved') this.q('solved-prompt').hidden = view.askSolved !== true;
     this.renderCase();
     this.schedulePoll();
   }
@@ -1015,6 +1047,7 @@ class BankAssistant extends HTMLElement {
           finished = true;
           this.conversationId = ev.conversationId;
           if (TEXT[ev.language]) { this.lang = ev.language; this.render(); }
+          this.attachAnswerFeedback(bubble, ev.answerId);
           if (guides.length) this.addChip(`${TEXT[this.lang].used}${this.lang === 'fr' ? ' : ' : ': '}${guides.map((g) => g.title).join(', ')}`);
         } else if (ev.type === 'error') {
           throw new Error(ev.code);

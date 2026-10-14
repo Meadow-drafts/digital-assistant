@@ -105,7 +105,7 @@ export async function drive(t, extra = {}) {
   await svc.clock.advance(6 * MIN); // the pool is paged
   events.push((await aline.claim(ref)).body);
   await say_(`here is my otp ${OTP} for the agent`);
-  await svc.clock.advance(11 * MIN); // soft "still working on it"
+  await svc.clock.advance(11 * MIN); // silence timer and its audit record
   await svc.clock.advance(20 * MIN); // re-broadcast
   events.push((await aline.reply(ref, 'Thank you, I am looking into it.')).body);
   await svc.clock.advance(5 * MIN); // the customer has left: an agent reply emails them

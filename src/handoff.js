@@ -26,19 +26,6 @@ export const QUEUED_AFTER_HOURS = {
   en: 'Our support team is closed right now. Your case is queued and an agent will pick it up at the start of the next shift. We will email you.',
   fr: "Notre équipe est fermée pour le moment. Votre dossier est mis en file d'attente et un agent le prendra au début de la prochaine période d'ouverture. Nous vous écrirons par e-mail.",
 };
-// Notices the customer sees in the case, never naming anyone. The transfer wording is deliberately neutral.
-const SOFT = {
-  en: 'We are still working on it. Thank you for your patience.',
-  fr: 'Nous y travaillons toujours. Merci de votre patience.',
-};
-const FOLLOW_UP = {
-  en: 'This is taking longer than expected. You can leave this chat: we will email you as soon as the agent replies.',
-  fr: "Cela prend plus de temps que prévu. Vous pouvez quitter ce chat : nous vous écrirons par e-mail dès que l'agent aura répondu.",
-};
-const TRANSFERRED = {
-  en: 'Your case has been passed to a colleague, who will continue from here. You do not need to repeat anything.',
-  fr: "Votre dossier a été confié à un collègue, qui poursuit à partir d'ici. Vous n'avez rien à répéter.",
-};
 // Emails to the customer carry the case reference and a fixed sentence, never anything from the conversation.
 const CUSTOMER_MAIL = {
   received: {
@@ -71,8 +58,6 @@ export function createHandoff({ identity, database, clock, audit, failedQuestion
 
   // The one place text enters a case transcript. Everything except an agent's own words is masked first.
   const add = (c, from, text, extra) => store.append(c, from, from === 'agent' || from === 'system' ? text : maskText(text), extra);
-  // A system line the customer sees too (the soft "still working on it", the transfer notice).
-  const notify = (c, texts) => add(c, 'system', texts[c.language] ?? texts.en, { public: true });
 
   // Who is calling, from the signed session id (see identity.js); a bad or expired id is a 401. `verified` routes also
   // refuse a guest, who has no gateway-checked identity.
@@ -127,19 +112,23 @@ export function createHandoff({ identity, database, clock, audit, failedQuestion
 
   // Case lifecycle after the claim. Two clocks, each restarted by an event and made harmless by a generation number
   // (the controllable clock cannot cancel a timer that was set before a restart, so the old one just finds it is stale).
-  //   silence: the customer is waiting for the agent. Soft message at agentSilenceMs, re-broadcast at agentFollowUpMs.
+  //   silence: the customer is waiting for the agent. Audit at agentSilenceMs, re-broadcast at agentFollowUpMs.
   //   activity: any message on the case. No message for autoResolveMs resolves it.
   // Every deadline is worked out from a time stored on the case (silenceStartedAt, activityAt), so after a restart the
   // same timers are armed again for the same moments (ticket 62): one already due fires at once, the rest keep their time.
   const remaining = (from, ms) => Math.max(0, from + ms - clock.now());
   function armSilence(c) {
+    // Older stored cases used `softSent` for this same deadline; carry it forward without replaying the audit event.
+    if (c.silenceAudited === undefined && c.softSent !== undefined) {
+      c.silenceAudited = c.softSent;
+      delete c.softSent;
+    }
     const gen = c.silenceGen;
     const live = () => c.state === 'with_agent' && c.silenceGen === gen;
-    if (!c.softSent) {
+    if (!c.silenceAudited) {
       clock.setTimeout(async () => {
         if (!live()) return;
-        c.softSent = true;
-        notify(c, SOFT);
+        c.silenceAudited = true;
         await record(c, 'case_still_working');
       }, remaining(c.silenceStartedAt, timers.agentSilenceMs));
     }
@@ -148,7 +137,6 @@ export function createHandoff({ identity, database, clock, audit, failedQuestion
         if (!live()) return;
         c.followUpOffered = true;
         c.openToPool = true; // from this moment any agent can open and claim it; set before the first await
-        notify(c, FOLLOW_UP);
         await page(c, agents.list, 'case_rebroadcast', overdueText);
       }, remaining(c.silenceStartedAt, timers.agentFollowUpMs));
     }
@@ -157,7 +145,7 @@ export function createHandoff({ identity, database, clock, audit, failedQuestion
     c.silenceGen = (c.silenceGen ?? 0) + 1;
     c.awaitingAgent = true;
     c.followUpOffered = false;
-    c.softSent = false;
+    c.silenceAudited = false;
     c.openToPool = false; // a new clock means somebody is on it again: the case is closed to the pool
     c.silenceStartedAt = clock.now();
     armSilence(c);
@@ -340,7 +328,8 @@ export function createHandoff({ identity, database, clock, audit, failedQuestion
   const customerState = (c) => (c.state === 'resolved' && c.closeReason === 'cancelled_by_user' ? 'cancelled' : c.state);
   // The last time something the customer could notice happened: a state change, or a message of theirs, an agent's or a
   // public notice. Internal system notes ("transferred from X to Y") do not count, their public twin does.
-  const updatedAtOf = (c) => Math.max(c.openedAt, c.claimedAt ?? 0, c.resolvedAt ?? 0, c.reopenedAt ?? 0, ...c.transcript.filter((m) => m.from !== 'system' || m.public).map((m) => m.at));
+  const updatedAtOf = (c) => Math.max(c.openedAt, c.claimedAt ?? 0, c.resolvedAt ?? 0, c.reopenedAt ?? 0,
+    ...(c.transfers ?? []).map((transfer) => transfer.at), ...c.transcript.filter((m) => m.from !== 'system' || m.public).map((m) => m.at));
   const iso = (ms) => new Date(ms).toISOString();
   const myCaseView = (c) => ({ ref: c.ref, state: customerState(c), openedAt: iso(c.openedAt), updatedAt: iso(updatedAtOf(c)) });
   // A closed case is listed for the retention period (measured like the purge job, so the two never disagree between runs);
@@ -480,7 +469,7 @@ export function createHandoff({ identity, database, clock, audit, failedQuestion
     return null;
   };
   // The levels come from the same timers the lifecycle runs on: the whole pool is paged at broadcastMs and the customer is told
-  // "queued" at queuedNoticeMs; the customer gets "still working on it" at agentSilenceMs and the case is re-broadcast at agentFollowUpMs.
+  // "queued" at queuedNoticeMs; agent silence is audited at agentSilenceMs and re-broadcast at agentFollowUpMs.
   const thresholds = {
     waiting: { warnSeconds: timers.broadcastMs / 1000, urgentSeconds: timers.queuedNoticeMs / 1000 },
     withAgent: { warnSeconds: timers.agentSilenceMs / 1000, urgentSeconds: timers.agentFollowUpMs / 1000 },
@@ -628,7 +617,6 @@ export function createHandoff({ identity, database, clock, audit, failedQuestion
     if (!target || target.id === agent.id) { json(res, 400, { error: 'bad_agent' }); return; }
     store.transfer(c, target);
     add(c, 'system', `Case transferred from ${agent.name} to ${target.name}.`);
-    notify(c, TRANSFERRED);
     agentSeen(c);
     awaitAgent(c); // the colleague starts with a fresh clock: the customer has not been waiting on them
     touch(c);
@@ -644,7 +632,6 @@ export function createHandoff({ identity, database, clock, audit, failedQuestion
     if (!taken.ok) { json(res, taken.reason === 'not_found' ? 404 : 409, { error: taken.reason }); return; }
     const c = taken.case;
     add(c, 'system', `Case taken over by ${agent.name} from ${taken.from.name} after the re-broadcast.`);
-    notify(c, TRANSFERRED);
     agentSeen(c);
     awaitAgent(c);
     touch(c);

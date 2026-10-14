@@ -46,7 +46,7 @@ export function asData(text) {
   return `<user_data>\n${safe}\n</user_data>`;
 }
 
-export const modelHistory = (history) => history.map((m) => (m.role === 'user' ? { ...m, content: asData(m.content) } : m));
+export const modelHistory = (history) => history.map(({ role, content }) => ({ role, content: role === 'user' ? asData(content) : content }));
 
 const pageContextText = (page) => page ? `\n\n# VERIFIED PAGE HINT\n${page.surface === 'my-cases' ? `The assistant widget reports that its ${page.label} panel is open.` : `The browser reported a fresh pathname matching the allowlisted ${page.label} page.`} Its verified guide options are:\n${page.guides.map((guide) => `${guide.id}: ${guide.title}`).join('\n')}\nUse this only when the customer refers to here or this page, and choose only a listed guide that matches their request. If none fits, say you do not have verified steps. Do not claim the customer's current location as a fact, and do not claim a form was filled, submitted, or changed. This context contains no form values.` : '';
 

@@ -103,7 +103,7 @@ Stories 95 and 96 (scoreboard, scripted replay) belong to the later phases (tick
 | 69 | console-context: priority flag, queue order, PRIORITY page, after-hours order | Proven |
 | 70 | handoff: "the agent chats back in the same session"; console: "claims, reads the masked transcript, chats with the customer and resolves" | Proven |
 | 71 | case-lifecycle: transfer tests; console: "agent transfers the case from the console to a colleague" | Proven |
-| 72 | case-lifecycle: 10 min soft message, 30 min re-broadcast and email offer; rebroadcast-takeover: closed before 30 min (-1 s, exactly, +1 s), any agent can open and claim after, one winner, holder reply ends it, page carries no content; console | Proven |
+| 72 | case-lifecycle: 10 min silence audit, 30 min re-broadcast and email offer without unsolicited customer messages; rebroadcast-takeover: closed before 30 min (-1 s, exactly, +1 s), any agent can open and claim after, one winner, holder reply ends it, page carries no content; console | Proven |
 | 73 | handoff: "the agent resolves the case"; case-lifecycle: "inactive cases auto-resolve at 24 hours exactly" | Proven |
 
 ## Safety and trust
