@@ -204,6 +204,41 @@ test('far above the customer usual amount raises the line even below the absolut
   assert.ok(cardOf(small.events).doubleCheck, 'the threshold is the configured one');
 });
 
+test('a one-digit look-alike of a recent beneficiary raises the double-check line', async (t) => {
+  const usual = withConfig((c) => {
+    c.doubleCheck.largeAmount = 10_000_000;
+  });
+  const near = await ask(t, {
+    message: 'Send 5000 to 237677000998', prefill: usual,
+    setup: (a) => { a.rows = [
+      row(a, { telop: '237677000998', codewalop: '237677000998', mtrans: 5000 }),
+      row(a, { ntrans: 'N0002', clientReferenceId: 'REF-0002', telop: '237677000999', codewalop: '237677000999', mtrans: 2000 }),
+    ]; },
+    answer: tag('single_transfer', { destination: '237677000998', amount: 5000 }),
+  });
+  assert.equal(cardOf(near.events).doubleCheck, 'Is this beneficiary and amount right?');
+
+  const unrelated = await ask(t, {
+    message: 'Send 5000 to 237699111222', prefill: usual,
+    setup: (a) => { a.rows = [
+      row(a, { telop: '237699111222', codewalop: '237699111222', mtrans: 3000 }),
+      row(a, { ntrans: 'N0002', clientReferenceId: 'REF-0002', telop: '237677000999', codewalop: '237677000999', mtrans: 2000 }),
+    ]; },
+    answer: tag('single_transfer', { destination: '237699111222', amount: 5000 }),
+  });
+  assert.equal(cardOf(unrelated.events).doubleCheck, null);
+});
+
+test('repeating a recent payment to the same beneficiary for the same amount raises the line', async (t) => {
+  const usual = withConfig((c) => { c.doubleCheck.largeAmount = 10_000_000; });
+  const setup = (a) => { a.rows = [row(a, { telop: '237677000999', codewalop: '237677000999', mtrans: 5000 })]; };
+  const repeat = await ask(t, { message: 'Send 5000 to 237677000999', setup, prefill: usual, answer: tag('single_transfer', { destination: '237677000999', amount: 5000 }) });
+  assert.equal(cardOf(repeat.events).doubleCheck, 'Is this beneficiary and amount right?');
+
+  const differentAmount = await ask(t, { message: 'Send 6000 to 237677000999', setup, prefill: usual, answer: tag('single_transfer', { destination: '237677000999', amount: 6000 }) });
+  assert.equal(cardOf(differentAmount.events).doubleCheck, null);
+});
+
 test('the double-check is only a line on the card: the card has no extra step and nothing is blocked', async (t) => {
   const { events } = await ask(t, { answer: tag('single_transfer', { destination: NEW_WALLET, amount: 5000 }) });
   const card = cardOf(events);

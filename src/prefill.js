@@ -105,6 +105,14 @@ function numbersIn(message) {
 const wordsIn = (message) => new Set(message.split(/\s+/).map((t) => t.replace(/^[("'«[]+/, '').replace(/[)"'»\]?!,;:.]+$/, '').toLowerCase()));
 
 const digitsOf = (v) => String(v ?? '').replace(/\D/g, '');
+// The beneficiary validator accepts at least six digits; compare equal-length identifiers only.
+const oneDigitApart = (left, right) => {
+  if (left.length !== right.length || left.length < 6) return false;
+  let differences = 0;
+  for (let i = 0; i < left.length; i++) if (left[i] !== right[i] && ++differences > 1) return false;
+  return differences === 1;
+};
+const recipientDigits = (row) => [row.telop, row.codewalop, row.ccpt].map(digitsOf).filter(Boolean);
 const REFERENCE = /^[A-Za-z0-9\-_/.]{3,40}$/;
 const HISTORY_REF = /^[A-Za-z0-9._-]{4,64}$/;
 const CONTROL = /[\u0000-\u001f\u007f]|\[\[|\]\]/;
@@ -225,12 +233,18 @@ export async function validatePrefill({ registry, navigation, proposal, language
   if (named && form.checks.includes('newBeneficiary')) {
     const sent = await outgoing();
     // history that cannot be read cannot vouch that the beneficiary is known
-    doubleCheck = sent === null || !sent.some((r) => [r.telop, r.codewalop, r.ccpt].some((id) => digitsOf(id) === named.value));
+    const known = sent?.some((r) => recipientDigits(r).includes(named.value)) ?? false;
+    doubleCheck = sent === null || !known;
+    if (!doubleCheck) {
+      doubleCheck = sent.some((r) => recipientDigits(r).some((digits) => digits !== named.value && oneDigitApart(named.value, digits)));
+    }
   }
   if (amount && form.checks.includes('largeAmount') && !doubleCheck) {
-    if (amount.number >= cfg.largeAmount) doubleCheck = true;
+    const sent = await outgoing();
+    const repeated = named && (sent ?? []).some((r) => recipientDigits(r).includes(named.value) && Number(r.mtrans) === amount.number);
+    if (repeated || amount.number >= cfg.largeAmount) doubleCheck = true;
     else {
-      const amounts = ((await outgoing()) ?? []).map((r) => Number(r.mtrans)).filter((n) => n > 0);
+      const amounts = (sent ?? []).map((r) => Number(r.mtrans)).filter((n) => n > 0);
       doubleCheck = amounts.length >= cfg.minHistory && amount.number > cfg.usualMultiple * median(amounts);
     }
   }
