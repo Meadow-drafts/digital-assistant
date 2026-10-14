@@ -8,13 +8,27 @@ import { createFakeClock } from './fake-clock.js';
 // events (dropped mid-reply). `requests`: the /chat bodies the widget sent.
 export function createNetwork() {
   const net = {
-    offline: false, hold: false, cutAfterEvents: null, requests: [],
+    offline: false, hold: false, cutAfterEvents: null, cutAfterEvent: null, requests: [],
     setOffline(value, window) {
       net.offline = value;
       Object.defineProperty(window.navigator, 'onLine', { value: !value, configurable: true });
     },
   };
   return net;
+}
+
+function abortable(promise, signal) {
+  if (!signal) return promise;
+  return new Promise((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener('abort', stop);
+    const stop = () => { cleanup(); reject(new DOMException('aborted', 'AbortError')); };
+    if (signal.aborted) { stop(); return; }
+    signal.addEventListener('abort', stop, { once: true });
+    promise.then(
+      (value) => { cleanup(); resolve(value); },
+      (error) => { cleanup(); reject(error); },
+    );
+  });
 }
 
 function withNetwork(net, window, baseUrl) {
@@ -25,32 +39,49 @@ function withNetwork(net, window, baseUrl) {
     // jsdom's AbortSignal is not Node's: pass the request on without it.
     const { signal, ...rest } = init;
     const pending = rawFetch(target, rest);
+    let res;
     if (net.hold && target.pathname === '/chat') {
-      await pending;
-      await new Promise((resolve, reject) => {
-        const stop = () => reject(new DOMException('aborted', 'AbortError'));
-        if (signal?.aborted) stop();
-        signal?.addEventListener('abort', stop);
-        net.release = () => { net.hold = false; resolve(); };
-      });
-    }
-    const res = await pending;
-    if (net.cutAfterEvents === null || target.pathname !== '/chat') return res;
+      let release;
+      const held = new Promise((resolve) => { release = () => { net.hold = false; resolve(); }; });
+      net.release = release;
+      res = await abortable(pending, signal);
+      await abortable(held, signal);
+    } else res = await abortable(pending, signal);
+    if ((net.cutAfterEvents === null && net.cutAfterEvent === null) || target.pathname !== '/chat') return res;
     let left = net.cutAfterEvents;
+    const eventToCutAfter = net.cutAfterEvent;
     net.cutAfterEvents = null;
+    net.cutAfterEvent = null;
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     const encoder = new TextEncoder();
     let buffer = '';
+    let cut = false;
     const body = new ReadableStream({
       async pull(controller) {
-        if (left <= 0) { controller.error(new TypeError('network error')); return; }
+        if (cut || left !== null && left <= 0) { controller.error(new TypeError('network error')); return; }
         const { done, value } = await reader.read();
         if (done) { controller.close(); return; }
         buffer += decoder.decode(value, { stream: true });
         let out = '';
         let i;
-        while (left > 0 && (i = buffer.indexOf('\n\n')) >= 0) { out += buffer.slice(0, i + 2); buffer = buffer.slice(i + 2); left -= 1; }
+        while ((i = buffer.indexOf('\n\n')) >= 0 && (left === null || left > 0)) {
+          const block = buffer.slice(0, i + 2);
+          buffer = buffer.slice(i + 2);
+          const event = block.match(/^event: (.*)$/m)?.[1];
+          let deliveredBlock = block;
+          if (eventToCutAfter && event === eventToCutAfter.type) {
+            const dataMatch = /^data: (.*)$/m.exec(block);
+            const data = JSON.parse(dataMatch?.[1] ?? 'null');
+            if (eventToCutAfter.textPrefix && typeof data.text === 'string' && data.text.startsWith(eventToCutAfter.textPrefix)) {
+              data.text = eventToCutAfter.textPrefix;
+              deliveredBlock = block.replace(dataMatch[1], JSON.stringify(data));
+            }
+          }
+          out += deliveredBlock;
+          if (left !== null) left -= 1;
+          if (eventToCutAfter && event === eventToCutAfter.type) { cut = true; break; }
+        }
         if (out) controller.enqueue(encoder.encode(out));
       },
     });

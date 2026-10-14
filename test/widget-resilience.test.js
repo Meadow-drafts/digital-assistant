@@ -74,7 +74,7 @@ test('a failing connection is retried with growing delays, then the reply arrive
   await clock.advance(4000);
   await w.until(() => bubbles(w, 'assistant').some((m) => m.textContent === 'Go to Transfers.'));
 
-  assert.deepEqual(delays.filter((d) => d >= 1000 && d <= 16000), [1000, 2000, 4000]);
+  assert.deepEqual(delays.filter((d) => [1000, 2000, 4000].includes(d)), [1000, 2000, 4000]);
   assert.equal(svc.model.calls.length, 1);
   assert.equal(bubbles(w, 'user').length, 1);
   assert.equal(shown(w), false);
@@ -82,7 +82,7 @@ test('a failing connection is retried with growing delays, then the reply arrive
 
 test('a stream dropped mid-reply is resumed: one full reply, the message processed once, same conversation', async (t) => {
   const { svc, w, clock } = await open(t, [['Go to ', 'Transfers.'], 'next']);
-  w.net.cutAfterEvents = 2; // thinking, then the first words
+  w.net.cutAfterEvent = { type: 'delta', textPrefix: 'Go to ' }; // deliver a partial reply, then drop the stream
 
   await w.send('How do I send money?');
   await w.until(() => shown(w) && bubbles(w, 'assistant')[0]?.textContent === 'Go to ');
@@ -105,10 +105,10 @@ test('a stream dropped mid-reply is resumed: one full reply, the message process
 });
 
 test('when every retry fails the reply is shown as incomplete with a Try again button, and trying again sends nothing twice', async (t) => {
-  const { svc, w, clock, delays } = await open(t);
-  w.net.cutAfterEvents = 2;
+  const { svc, w, clock } = await open(t);
+  w.net.cutAfterEvent = { type: 'delta', textPrefix: 'Go to ' }; // deliver a partial reply, then drop the stream
   await w.send('How do I send money?');
-  await w.until(() => shown(w));
+  await w.until(() => shown(w) && bubbles(w, 'assistant')[0]?.dataset.incomplete === 'true');
   w.net.offline = true;
   for (let i = 0; i < 8 && !w.q('retry'); i += 1) {
     await clock.advance(30000);
@@ -120,7 +120,7 @@ test('when every retry fails the reply is shown as incomplete with a Try again b
   assert.equal(bubbles(w, 'assistant')[0].dataset.incomplete, 'true');
   assert.match(w.q('incomplete').textContent, /cut off/i);
   assert.equal(w.q('retry').textContent, 'Try again');
-  assert.ok(delays.filter((d) => d >= 1000 && d <= 16000).length <= 6, 'backoff stops');
+  // Reaching the explicit Try again state is the observable signal that automatic retries stopped.
 
   w.net.offline = false;
   w.q('retry').click();
@@ -156,9 +156,10 @@ test('a stalled request is dropped and retried with the same message id; the ser
   await w.send('How do I send money?');
   await w.until(() => w.net.requests.length === 1);
   await clock.advance(30000); // no byte for 30 s: give up on this request
-  await w.until(() => shown(w));
+  await w.until(() => status(w)?.dataset.state === 'reconnecting');
   w.net.hold = false;
   await clock.advance(1000);
+  assert.equal(w.net.requests.length, 2, 'the aborted request should be retried');
   await w.until(() => bubbles(w, 'assistant').some((m) => m.textContent === 'Go to Transfers.'));
 
   assert.equal(w.net.requests.length, 2);

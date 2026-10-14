@@ -13,7 +13,7 @@ Standalone assistant service and chat widget for the bank's portal. Spec and tic
 
 ```sh
 npm install
-npm test               # automated suite uses local fakes; latest ticket-36 run: 800 pass, 5 fail in ticket-50 widget-resilience tests
+npm test               # automated suite uses local fakes; latest ticket-36 run: 805 pass, 0 fail
 npm run check:guides   # fails if a guide exists in one language only
 npm start              # needs Node 22.13 or later (built-in SQLite). Service on http://localhost:3000, demo host page on /, agent console on /console
 ```

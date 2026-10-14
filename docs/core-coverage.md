@@ -1,6 +1,6 @@
 # Core coverage: spec stories 1-98 against the tests
 
-Originally written for ticket 36 on 2026-10-13. Updated 2026-10-14 against the current tests and eval artifacts. The latest `npm test` run gave 800 pass and 5 fail; all failures are in the ticket-50 widget resilience tests; that feature is outside the core dependency set, but the failures still block the suite required by ticket 36. Tests use fake models, fake gateway, fake mailer, fake clocks, local fixtures and ephemeral localhost service/provider endpoints. No real model or bank test server is called by the automated suite.
+Originally written for ticket 36 on 2026-10-13. Updated 2026-10-14 against the current tests and eval artifacts. The latest `npm test` run gave 805 pass and 0 fail. Tests use fake models, fake gateway, fake mailer, fake clocks, local fixtures and ephemeral localhost service/provider endpoints. No real model or bank test server is called by the automated suite.
 
 How to read the "Proof" column. The names are test files in `test/`, with a fragment of the test title. Owner-run browser checks are recorded separately in the ticket-36 issue and README portal checklist.
 
@@ -156,4 +156,4 @@ Stories 95 and 96 (scoreboard, scripted replay) belong to the later phases (tick
 - **3 proven, with a remaining limit**: 35 and 40 (ticket 58, non-blocking), and 59 (owner decision in ticket 55).
 - **1 gap**: 11, general-concept answers are not asserted in the EN/FR eval set.
 
-Ticket 34 and gaps 52-56 are implemented/done. The demo gate remains blocked by the five failing ticket-50 widget-resilience tests (not a core dependency, but still a required suite failure) and requires a clean rerun. The owner reports that the portal checklist passed and the existing ticket-36 run sheet records PASS for steps 0-12 in EN and FR; per-item portal observations were not recorded.
+Ticket 34 and gaps 52-56 are implemented/done. Ticket 50's widget-resilience tests now pass after correcting the fake-network stream/abort behavior, making the interrupted-stream fixture cut after partial reply text, and preserving an incomplete reply until resumed text arrives. The owner reports that the portal checklist passed and the existing ticket-36 run sheet records PASS for steps 0-12 in EN and FR; per-item portal observations were not recorded. The owner also reports a manual offline/reconnect check passed: the widget showed “Reconnecting”, then “Thinking”, then the reply; branding works.

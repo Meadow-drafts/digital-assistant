@@ -1129,9 +1129,6 @@ class BankAssistant extends HTMLElement {
   // otherwise { pinNeeded } when the turn ended, whether it answered or showed an error.
   async attempt(turn) {
     const { message } = turn;
-    const messages = this.q('messages');
-    // A repeat delivery draws the reply again from the start: drop what the failed one added (never the typed messages).
-    if (turn.before) for (const c of [...messages.children]) if (!turn.before.has(c) && c.dataset.from !== 'user') c.remove();
     this.fillRun = null; // a waiting pre-fill ends when the customer moves on to something else
     let pinNeeded = false;
     this.q('thinking').hidden = false;
@@ -1157,7 +1154,6 @@ class BankAssistant extends HTMLElement {
       arm();
       await this.startSession(token, ctl.signal);
       if (this.sessionDown) throw lost(new Error('session')); // never fall back to a guest chat because the network blinked
-      turn.before = new Set(messages.children);
       arm();
       let res;
       try {
@@ -1180,6 +1176,9 @@ class BankAssistant extends HTMLElement {
           automated = ev.automated === true; // the bot answering while a case waits for an agent
         } else if (ev.type === 'delta') {
           if (!bubble && automated) this.addAutomatedLabel();
+          // Keep a partial answer visible while a retry is still connecting. Replace it only once
+          // the resumed stream actually delivers new answer text.
+          if (!bubble && turn.reply?.dataset.incomplete) turn.reply.remove();
           bubble ??= this.addMessage('assistant');
           turn.reply = bubble;
           bubble.textContent += ev.text;
