@@ -19,7 +19,7 @@ test('the primary model answers, and switching model is a config change only', a
 
   const svcA = await startService({ model: createModel(configA) });
   t.after(svcA.close);
-  const a = await chatTurn(svcA.baseUrl, { message: 'Hi', tenant: 'demo' });
+  const a = await chatTurn(svcA.baseUrl, { message: 'Can you explain this?', tenant: 'demo' });
   assert.equal(replyOf(a.events), 'Hello from A');
   assert.equal(a.events.at(-1).model, 'model-a');
   assert.equal(groq.requests[0].body.model, 'model-a');
@@ -27,7 +27,7 @@ test('the primary model answers, and switching model is a config change only', a
 
   const svcB = await startService({ model: createModel(configB) });
   t.after(svcB.close);
-  const b = await chatTurn(svcB.baseUrl, { message: 'Hi', tenant: 'demo' });
+  const b = await chatTurn(svcB.baseUrl, { message: 'Can you explain this?', tenant: 'demo' });
   assert.equal(replyOf(b.events), 'Hello from B');
   assert.equal(b.events.at(-1).model, 'model-b');
   assert.equal(other.requests[0].body.model, 'model-b');
@@ -47,7 +47,7 @@ for (const [label, failure] of [['a rate limit', { status: 429 }], ['an outage',
     });
     t.after(svc.close);
 
-    const { events } = await chatTurn(svc.baseUrl, { message: 'Hi', tenant: 'demo' });
+    const { events } = await chatTurn(svc.baseUrl, { message: 'Can you explain this?', tenant: 'demo' });
 
     assert.equal(replyOf(events), 'Fallback answer');
     assert.equal(events.at(-1).type, 'done');
@@ -66,7 +66,7 @@ test('an unreachable primary falls back too', async (t) => {
     }),
   });
   t.after(svc.close);
-  const { events } = await chatTurn(svc.baseUrl, { message: 'Hi', tenant: 'demo' });
+    const { events } = await chatTurn(svc.baseUrl, { message: 'Can you explain this?', tenant: 'demo' });
   assert.equal(events.at(-1).model, 'fallback-m');
 });
 
@@ -108,7 +108,7 @@ test('with every model down the customer gets an error event and the turn is aud
     }),
   });
   t.after(svc.close);
-  const { events } = await chatTurn(svc.baseUrl, { message: 'Hi', tenant: 'demo' });
+  const { events } = await chatTurn(svc.baseUrl, { message: 'Can you explain this?', tenant: 'demo' });
   assert.equal(events.at(-1).type, 'error');
   assert.equal(svc.audit.records[0].outcome, 'error');
 });
@@ -128,7 +128,7 @@ test('API keys never reach the audit log or the customer, even when every provid
   const origLog = console.log;
   console.error = console.log = (...args) => logged.push(args.join(' '));
   let events;
-  try { ({ events } = await chatTurn(svc.baseUrl, { message: 'Hi', tenant: 'demo' })); } finally { console.error = origError; console.log = origLog; }
+  try { ({ events } = await chatTurn(svc.baseUrl, { message: 'Can you explain this?', tenant: 'demo' })); } finally { console.error = origError; console.log = origLog; }
 
   const everything = JSON.stringify([events, svc.audit.records, logged]);
   assert.ok(!everything.includes('SECRET'));
@@ -200,7 +200,7 @@ test('the real token count from the provider feeds the daily token budget', asyn
   const svc = await startService({ model: createModel({ primary: { baseUrl: provider.baseUrl, model: 'm', apiKey: 'k' } }), limits: { tokensPerDay: 100, tokensPerMinute: 1_000_000 } });
   t.after(svc.close);
 
-  const first = await chatTurn(svc.baseUrl, { message: 'Hi', tenant: 'demo' });
+  const first = await chatTurn(svc.baseUrl, { message: 'Can you explain this?', tenant: 'demo' });
   const second = await chatTurn(svc.baseUrl, { message: 'Hi again', tenant: 'demo' }, { token: 'someone-else' });
 
   assert.equal(replyOf(first.events), 'Hello', 'the usage chunk is not shown to the customer');
@@ -225,7 +225,7 @@ test('a daily-token 429 moves to the next model, and later turns do not try the 
   });
   t.after(svc.close);
 
-  const first = await chatTurn(svc.baseUrl, { message: 'Hi', tenant: 'demo' });
+  const first = await chatTurn(svc.baseUrl, { message: 'Can you explain this?', tenant: 'demo' });
   const askedFirst = primary.requests.length;
   const second = await chatTurn(svc.baseUrl, { message: 'Hi again', tenant: 'demo', conversationId: first.events.at(-1).conversationId });
 
@@ -251,7 +251,7 @@ test('a per-minute 429 only falls back for that call; the model is tried again o
   });
   t.after(svc.close);
 
-  const first = await chatTurn(svc.baseUrl, { message: 'Hi', tenant: 'demo' });
+  const first = await chatTurn(svc.baseUrl, { message: 'Can you explain this?', tenant: 'demo' });
   const second = await chatTurn(svc.baseUrl, { message: 'Hi again', tenant: 'demo', conversationId: first.events.at(-1).conversationId });
 
   assert.equal(first.events.at(-1).model, 'fallback-m');
@@ -272,7 +272,7 @@ test('a daily-token 429 with a tiny retry-after still keeps the model out until 
     model: createModel({ primary: { baseUrl: primary.baseUrl, model: 'primary-m', apiKey: 'k1' }, fallback: { baseUrl: fallback.baseUrl, model: 'fallback-m', apiKey: 'k2' }, clock }),
   });
   t.after(svc.close);
-  const turn = async () => (await chatTurn(svc.baseUrl, { message: 'Hi', tenant: 'demo' })).events.at(-1).model;
+  const turn = async () => (await chatTurn(svc.baseUrl, { message: 'Can you explain this?', tenant: 'demo' })).events.at(-1).model;
 
   assert.equal(await turn(), 'fallback-m');
   await clock.advance(3_000); // past the stated 2 s
@@ -290,8 +290,8 @@ test('when every model is exhausted for the day the customer gets the unavailabl
   const svc = await startService({ model: createModel({ primary: { baseUrl: primary.baseUrl, model: 'primary-m', apiKey: 'k1' } }) });
   t.after(svc.close);
 
-  const first = await chatTurn(svc.baseUrl, { message: 'Hi', tenant: 'demo' });
-  const second = await chatTurn(svc.baseUrl, { message: 'Hi', tenant: 'demo' });
+  const first = await chatTurn(svc.baseUrl, { message: 'Can you explain this?', tenant: 'demo' });
+  const second = await chatTurn(svc.baseUrl, { message: 'Can you explain this?', tenant: 'demo' });
 
   assert.equal(first.events.find((e) => e.type === 'error')?.code, 'model_unavailable');
   assert.equal(second.events.find((e) => e.type === 'error')?.code, 'model_unavailable');

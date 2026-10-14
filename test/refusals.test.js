@@ -43,7 +43,7 @@ test('a tag the service does not know cannot invent a category: it falls back to
   const svc = await startService({ model: createFakeModel(['[[refusal:wire_everything]]No.']) });
   t.after(svc.close);
 
-  const { events } = await chatTurn(svc.baseUrl, { message: 'hello', tenant: 'demo' });
+  const { events } = await chatTurn(svc.baseUrl, { message: 'Can you explain this?', tenant: 'demo' });
 
   assert.equal(refusalOf(events).category, 'off_topic');
   assert.equal(replyOf(events), 'No.');
@@ -53,7 +53,7 @@ test('a normal answer has no refusal event, and a tag in the middle of a reply i
   const svc = await startService({ model: createFakeModel(['You wrote [[refusal:execute]] in your message.']) });
   t.after(svc.close);
 
-  const { events } = await chatTurn(svc.baseUrl, { message: 'hello', tenant: 'demo' });
+  const { events } = await chatTurn(svc.baseUrl, { message: 'Can you explain this?', tenant: 'demo' });
 
   assert.equal(refusalOf(events), undefined);
   assert.equal(svc.audit.records[0].refusalCategory, undefined);

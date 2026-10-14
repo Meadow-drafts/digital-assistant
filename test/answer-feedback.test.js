@@ -8,7 +8,7 @@ test('answer feedback is tied to its answer and conversation, stores no answer o
   const svc = await startService();
   t.after(svc.close);
   const owner = await customer(svc.baseUrl, 'feedback-owner', 'My PIN is 123456, please help');
-  const answerId = (await owner.say('Thanks')).events.at(-1).answerId;
+  const answerId = (await owner.say('Can you explain this?')).events.at(-1).answerId;
   assert.ok(answerId, 'the answer has a stable public id');
 
   const saved = await call(svc.baseUrl, 'POST', '/feedback', {

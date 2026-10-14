@@ -68,8 +68,8 @@ test('an agent claims, reads the masked transcript, chats with the customer and 
   await w.until(() => w.qa('line').some((l) => l.dataset.from === 'agent'));
   assert.deepEqual((await c.status()).body.messages.map((m) => m.text), ['Hello, I am looking at your transfer now.']);
 
-  await c.say('Thank you');
-  await w.until(() => w.qa('line').some((l) => l.textContent.includes('Thank you')));
+  await c.say('Could you share an update?');
+  await w.until(() => w.qa('line').some((l) => l.textContent.includes('Could you share an update?')));
 
   w.q('resolve').click();
   await w.until(() => /resolved/i.test(w.q('detail-state').textContent));
