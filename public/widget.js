@@ -959,10 +959,14 @@ class BankAssistant extends HTMLElement {
       arm();
       let res;
       try {
+        const capturedAt = new Date().toISOString();
+        const pageContext = this.q('my-cases-panel').hidden
+          ? { path: window.location.pathname, capturedAt }
+          : { surface: 'my-cases', capturedAt };
         res = await fetch(`${this.getAttribute('api') ?? ''}/chat`, {
           method: 'POST',
           headers: { 'content-type': 'application/json', ...this.authHeaders(token) },
-          body: JSON.stringify({ message, messageId: turn.id, conversationId: this.conversationId, tenant: this.getAttribute('tenant'), pageContext: { path: window.location.pathname, capturedAt: new Date().toISOString() } }),
+          body: JSON.stringify({ message, messageId: turn.id, conversationId: this.conversationId, tenant: this.getAttribute('tenant'), pageContext }),
           signal: ctl.signal,
         });
       } catch (e) { throw lost(e); }

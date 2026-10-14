@@ -51,6 +51,37 @@ async function widgetFor(svc, t, c, { lang, withCli = true } = {}) {
 const rows = (w) => w.qa('my-case');
 const openList = async (w) => { w.q('my-cases-button').click(); await w.until(() => !w.q('my-cases-panel').hidden && !w.q('my-cases-loading').textContent); };
 
+test('asking for help while viewing My cases gives verified guidance for the case list', async (t) => {
+  const model = createFakeModel((request) => {
+    if (request.purpose === 'route') return '[]';
+    if (request.messages[0].content.includes('2. Your cases are listed newest first.')) return 'Select a case to see its state. For an open case, click Back to this chat.';
+    if (request.messages[0].content.includes('2. Vos dossiers sont affichés du plus récent au plus ancien.')) return 'Sélectionnez un dossier pour voir son état. Pour un dossier ouvert, cliquez sur Retour à ce chat.';
+    return 'No verified steps.';
+  });
+  for (const [lang, phrase] of [['en', /Select a case to see its state/], ['fr', /Sélectionnez un dossier pour voir son état/]]) {
+    const { svc, a } = await world(t, { model });
+    const w = await widgetFor(svc, t, a, { lang });
+    const BrowserDate = w.dom.window.Date;
+    w.dom.window.Date = class extends BrowserDate {
+      constructor(...args) { super(...(args.length ? args : [svc.clock.now()])); }
+      static now() { return svc.clock.now(); }
+    };
+
+    await openList(w);
+    await w.send(lang === 'fr' ? 'Que dois-je faire sur cette page ?' : 'What do I do on this page?');
+    const chatRequest = w.net.requests.at(-1);
+    assert.deepEqual(chatRequest.pageContext && Object.keys(chatRequest.pageContext).sort(), ['capturedAt', 'surface']);
+    assert.equal(chatRequest.pageContext.surface, 'my-cases');
+    await w.until(() => w.qa('message').some((message) => message.dataset.from === 'assistant' && message.textContent.trim()));
+
+    const answer = w.qa('message').filter((message) => message.dataset.from === 'assistant').at(-1).textContent;
+    assert.match(answer, phrase);
+    assert.doesNotMatch(answer, /no verified steps|aucune étape vérifiée/i);
+    assert.deepEqual(w.qa('action-card'), [], 'this assistant view has no separate portal page link');
+    w.dom.window.close();
+  }
+});
+
 test('"My cases" lists the customer\'s own cases newest first: reference, opened date, state and last update; nobody else\'s', async (t) => {
   const { svc, a, b, caseFor } = await world(t);
   const first = await caseFor(a);

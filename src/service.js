@@ -528,7 +528,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
           } else {
             const material = picks.map((id) => guides.get(id)?.[language] ?? null).filter(Boolean);
             // An answer from the unsupported list has no task page: the model is offered no links and none can be drawn.
-            const linkable = navigation && used.length > 0;
+            const linkable = navigation && used.length > 0 && page?.surface !== 'my-cases';
             await answer(answerMessages(material, picks.includes(UNSUPPORTED_ID) ? guides.unsupported : '', history, linkable ? offeredPages(navigation, language, ent) : [], page), {
               navigate: linkable ? { fallback: stepsOf(material[0]?.text ?? ''), entitlements: ent, guided: used.length > 0, guideRoutes: used.map((g) => g.route).filter(Boolean) } : null,
             });

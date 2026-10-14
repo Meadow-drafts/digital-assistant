@@ -59,6 +59,9 @@ test('unsupported, stale, and malformed page context are ignored and cannot add 
     { ...validContext('/payments/bill-payment'), amount: 5000, pin: '1234', cardNumber: 'FORM_SECRET_SENTINEL' },
     { path: '/payments/bill-payment/12345', capturedAt: new Date(NOW).toISOString() },
     { path: '/payments/bill-payment?amount=5000', capturedAt: new Date(NOW).toISOString() },
+    { surface: 'case-detail', capturedAt: new Date(NOW).toISOString() },
+    { surface: 'my-cases', capturedAt: new Date(NOW).toISOString(), accountNo: 'FORM_SECRET_SENTINEL' },
+    { surface: 'my-cases', capturedAt: new Date(NOW - 3 * 60_000).toISOString() },
   ];
   for (const pageContext of contexts) {
     const result = await ask(t, { message: 'What do I do on this page?', pageContext });

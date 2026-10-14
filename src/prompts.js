@@ -48,7 +48,7 @@ export function asData(text) {
 
 export const modelHistory = (history) => history.map((m) => (m.role === 'user' ? { ...m, content: asData(m.content) } : m));
 
-const pageContextText = (page) => page ? `\n\n# VERIFIED PAGE HINT\nThe browser reported a fresh pathname matching the allowlisted ${page.label} page. Its verified guide options are:\n${page.guides.map((guide) => `${guide.id}: ${guide.title}`).join('\n')}\nUse this only when the customer refers to here or this page, and choose only a listed guide that matches their request. If none fits, say you do not have verified steps. Do not claim the customer's current location as a fact, and do not claim a form was filled, submitted, or changed. This context contains no form values.` : '';
+const pageContextText = (page) => page ? `\n\n# VERIFIED PAGE HINT\n${page.surface === 'my-cases' ? `The assistant widget reports that its ${page.label} panel is open.` : `The browser reported a fresh pathname matching the allowlisted ${page.label} page.`} Its verified guide options are:\n${page.guides.map((guide) => `${guide.id}: ${guide.title}`).join('\n')}\nUse this only when the customer refers to here or this page, and choose only a listed guide that matches their request. If none fits, say you do not have verified steps. Do not claim the customer's current location as a fact, and do not claim a form was filled, submitted, or changed. This context contains no form values.` : '';
 
 export function routerMessages(index, history, { tools = '', retry = false, page = null } = {}) {
   const again = retry ? ' Reminder: this customer is asking how to do a portal task. That is a how-to request, not a request to execute: reply with the guide id(s) for the task, or [] if none fits. Do not refuse.' : '';
