@@ -324,8 +324,20 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     const path = url.searchParams.get('path');
     const route = navigation && [...navigation.routes].find(([, item]) => item.path === path);
     const contextGuides = route ? available.filter((guide) => guide.route === path || guide.route?.startsWith(`${path.replace(/\/$/, '')}/`)) : [];
+    const contextDescriptions = {
+      overview: { en: 'See balance and recent activity guidance', fr: 'Consulter les conseils sur le solde et l’activité récente' },
+      history: { en: 'Find and review your transactions', fr: 'Retrouver et consulter vos transactions' },
+      account_history: { en: 'Review activity on your account', fr: 'Consulter l’activité de votre compte' },
+      transfer: { en: 'Get help with making a transfer', fr: 'Obtenir de l’aide pour effectuer un transfert' },
+      payments: { en: 'Get help with your payments', fr: 'Obtenir de l’aide sur vos paiements' },
+      bill_payment: { en: 'Get help paying a bill', fr: 'Obtenir de l’aide pour payer une facture' },
+      vouchers: { en: 'Get help finding and using vouchers', fr: 'Obtenir de l’aide pour trouver et utiliser vos bons' },
+      airtime: { en: 'Get help buying airtime', fr: 'Obtenir de l’aide pour acheter du crédit téléphonique' },
+      request_to_pay: { en: 'Get help with payment requests', fr: 'Obtenir de l’aide sur les demandes de paiement' },
+    };
     const context = route && contextGuides.length ? {
       label: route[1].labels[lang] ?? route[1].labels.en,
+      description: contextDescriptions[route[0]]?.[lang] ?? (lang === 'fr' ? 'Consulter les conseils pour cette page' : 'See guidance for this page'),
       topics: contextGuides.map((guide) => ({ key: guide.id, title: guide[lang].title })),
     } : null;
     reply(200, { topics, context });

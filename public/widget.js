@@ -24,7 +24,7 @@ const TEXT = {
     launcher: 'Open BPay assistant', newChat: 'New chat', more: 'More options', minimize: 'Minimize assistant', messageLabel: 'Ask about BPay',
     welcome: 'How can I help with BPay?', welcomeHint: 'Browse a topic below or ask in your own words. I’ll guide you using information available for your account.',
     helpTopics: 'Popular how-to topics', searchTopics: 'Search help topics', noTopics: 'No matching topics are available. Ask your question below.', loadingTopics: 'Loading available help topics…',
-    quickOverview: 'Quick help for', contextualOverview: 'See balance and recent activity guidance', genericHelp: 'Browse help topics or ask a question',
+    welcomeName: (name) => name ? `Welcome, ${name}` : 'Welcome', quickHelp: 'Quick help for',
     help: 'Help and privacy', home: 'Help topics',
     title: 'Assistant',
     placeholder: 'Ask how to do something…',
@@ -84,6 +84,7 @@ const TEXT = {
     sendError: 'Nothing was sent. Please try again.',
     caseChanged: 'Your case changed in the meantime. Nothing was sent: please review your message again.',
     myCases: 'My cases',
+    myCasesHint: 'Track your support requests and view their latest status.',
     myCasesLoading: 'Loading your cases…',
     myCasesEmpty: 'You have no cases yet.',
     myCasesError: 'We could not load your cases. Please try again.',
@@ -102,7 +103,7 @@ const TEXT = {
     launcher: 'Ouvrir l’assistant BPay', newChat: 'Nouvelle discussion', more: 'Plus d’options', minimize: 'Réduire l’assistant', messageLabel: 'Posez une question sur BPay',
     welcome: 'Comment puis-je vous aider avec BPay ?', welcomeHint: 'Parcourez les sujets ou posez votre question avec vos mots. Je vous guiderai selon les informations disponibles pour votre compte.',
     helpTopics: 'Guides pratiques populaires', searchTopics: 'Rechercher des sujets', noTopics: 'Aucun sujet correspondant n’est disponible. Posez votre question ci-dessous.', loadingTopics: 'Chargement des sujets disponibles…',
-    quickOverview: 'Aide rapide pour', contextualOverview: 'Consulter les conseils sur le solde et l’activité récente', genericHelp: 'Parcourez les sujets ou posez une question',
+    welcomeName: (name) => name ? `Bienvenue, ${name}` : 'Bienvenue', quickHelp: 'Aide rapide pour',
     help: 'Aide et confidentialité', home: 'Sujets d’aide',
     title: 'Assistant',
     placeholder: 'Demandez comment faire…',
@@ -162,6 +163,7 @@ const TEXT = {
     sendError: "Rien n'a été envoyé. Veuillez réessayer.",
     caseChanged: "Votre dossier a changé entre-temps. Rien n'a été envoyé : relisez votre message.",
     myCases: 'Mes dossiers',
+    myCasesHint: 'Suivez vos demandes d’assistance et consultez leur statut.',
     myCasesLoading: 'Chargement de vos dossiers…',
     myCasesEmpty: "Vous n'avez pas encore de dossier.",
     myCasesError: "Nous n'avons pas pu charger vos dossiers. Veuillez réessayer.",
@@ -199,7 +201,7 @@ const brandColor = (value) => {
 };
 
 class BankAssistant extends HTMLElement {
-  static get observedAttributes() { return ['brand-name', 'brand-primary', 'brand-secondary']; }
+  static get observedAttributes() { return ['brand-name', 'brand-primary', 'brand-secondary', 'customer-name']; }
 
   connectedCallback() {
     this.lang = this.getAttribute('lang') === 'fr' ? 'fr' : 'en';
@@ -215,7 +217,7 @@ class BankAssistant extends HTMLElement {
         .ba-root *, .ba-root *::before, .ba-root *::after { box-sizing:border-box; }
         .ba-root button, .ba-root input { font:inherit; }
         .ba-root button { cursor:pointer; }
-        .ba-root button:focus-visible, .ba-root input:focus-visible { outline:3px solid #e7a563; outline-offset:2px; }
+        .ba-root button:focus-visible { outline:2px solid #a95f1f; outline-offset:2px; }
         .ba-root [hidden] { display:none !important; }
         .ba-shell { position:fixed; z-index:2147483000; right:24px; bottom:20px; width:min(460px,calc(100vw - 24px)); height:min(760px,calc(100dvh - 32px)); background:#fff; border:1px solid #e6e7ea; border-radius:22px; box-shadow:0 18px 60px #1b202933; display:flex; flex-direction:column; overflow:hidden; }
         .ba-header { flex:none; display:flex; align-items:center; gap:10px; padding:12px 15px; border-bottom:1px solid #eceef0; }
@@ -230,21 +232,37 @@ class BankAssistant extends HTMLElement {
         .ba-home { flex:1; min-height:0; overflow:auto; padding:20px 24px 12px; }
         .ba-welcome { text-align:center;margin:7px auto 21px; }
         .ba-welcome h2 { margin:0 0 7px;font-size:23px;letter-spacing:-.4px; }
+        .ba-welcome .ba-welcome-name { margin:0 0 4px;color:#737780;font-size:13px;font-weight:600; }
         .ba-welcome p { margin:auto;max-width:350px;color:#747982;font-size:13px; }
         .ba-context { display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:15px;background:#fff8f1;border:1px solid #f7e6d6;border-radius:12px;text-align:left;color:#30343a; }
         .ba-context button { width:100%;border:0;background:transparent;text-align:left;color:inherit; }
         .ba-context strong,.ba-context small { display:block; }
         .ba-context small { color:#737780; }
         .ba-search { display:flex;align-items:center;gap:8px;padding:0 12px;height:42px;border:1px solid #e1e3e6;background:#fafafb;border-radius:11px;margin-bottom:12px; }
-        .ba-search input { width:100%;min-width:0;border:0;outline:0;background:transparent;color:#30343b; }
+        .ba-search:focus-within { border-color:#d8a16d;box-shadow:0 0 0 3px #e6ad7829; }
+        .ba-search input { width:100%;min-width:0;border:0;outline:0 !important;box-shadow:none !important;background:transparent;color:#30343b; }
         .ba-home h3 { margin:12px 0 5px;color:#6d727a;font-size:11px;letter-spacing:.05em;text-transform:uppercase; }
         .ba-topic { width:100%;display:flex;align-items:center;gap:10px;padding:9px 5px;border:0;border-radius:9px;background:transparent;text-align:left;color:#30343a; }
         .ba-topic:hover { background:#f7f7f8; }
         .ba-topic span:nth-child(2) { flex:1; }
         .ba-topic .ba-topic-icon { color:#777e87; }
+        .ba-cases { padding:0 18px 18px; }
+        .ba-cases-head { display:flex;align-items:flex-start;gap:12px;padding:3px 0 14px;border-bottom:1px solid #eceef0; }
+        .ba-cases-head h2 { flex:1;margin:0;font-size:19px;line-height:1.25; }
+        .ba-cases-head p { margin:5px 0 0;color:#747982;font-size:12px; }
+        .ba-cases-head button,.ba-case-back { flex:none;border:0;border-radius:9px;background:#f5f5f6;color:#555b64;padding:8px 11px; }
+        .ba-case-list { list-style:none;padding:8px 0 0;margin:0;display:grid;gap:8px; }
+        .ba-case-card { width:100%;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px;padding:13px 14px;border:1px solid #e8e9eb;border-radius:13px;background:#fff;text-align:left;color:#30343a; }
+        .ba-case-card:hover { border-color:#edc49e;background:#fffaf6; }
+        .ba-case-ref { font-weight:700; }
+        .ba-case-state { align-self:start;padding:3px 8px;border-radius:999px;background:#f2f3f4;color:#5e636b;font-size:11px;font-weight:600; }
+        .ba-case-state[data-state="waiting"],.ba-case-state[data-state="with_agent"] { background:#fff2e4;color:#96500f; }
+        .ba-case-meta { grid-column:1/-1;display:flex;flex-wrap:wrap;gap:2px 12px;color:#777d85;font-size:11px; }
+        .ba-case-detail { padding:15px;border:1px solid #e8e9eb;border-radius:13px;background:#fafafb; }
         .ba-empty { color:#777e87;padding:12px 3px; }
         .ba-body { flex:1;min-height:0;overflow:auto;padding:16px 20px;display:none; }
         .ba-body[data-active="true"] { display:block; }
+        .ba-root[data-cases-open="true"] .ba-body > :not([data-role="my-cases-panel"]),.ba-root[data-cases-open="true"] .ba-chips,.ba-root[data-cases-open="true"] .ba-compose { display:none !important; }
         .ba-body [data-role="messages"] { display:flex;flex-direction:column;gap:8px; }
         .ba-root [data-role="message"] { max-width:88%;padding:10px 13px;border-radius:15px;background:#f3f4f6; }
         .ba-root [data-from="user"] { align-self:flex-end;background:#fff0e2;border-top-right-radius:5px; }
@@ -255,7 +273,8 @@ class BankAssistant extends HTMLElement {
         .ba-chip[data-role="human-chip"]::before { content:'👤';margin-right:5px; }
         .ba-compose { flex:none;padding:0 14px 7px; }
         .ba-compose form { display:flex;gap:7px;align-items:center;padding:6px 7px 6px 12px;border:1px solid #d9dce0;border-radius:14px; }
-        .ba-compose [data-role="input"] { flex:1;min-width:0;border:0;outline:0;background:transparent;padding:5px 0; }
+        .ba-compose form:focus-within { border-color:#d8a16d;box-shadow:0 0 0 3px #e6ad7829; }
+        .ba-compose [data-role="input"] { flex:1;min-width:0;border:0;outline:0 !important;box-shadow:none !important;background:transparent;padding:5px 0; }
         .ba-root [data-role="send"] { background:var(--ba-accent);border:0;border-radius:10px;color:white;padding:8px 12px; }
         .ba-disclaimer { flex:none;text-align:center;color:#858991;font-size:10px;margin:0 0 8px;padding:0 8px; }
         .ba-launcher { position:fixed;z-index:2147483000;right:24px;bottom:20px;display:flex;align-items:center;gap:8px;padding:12px 16px;border:0;border-radius:999px;background:var(--ba-brand-primary,#ce6d0d);color:#fff;box-shadow:0 8px 26px #171a2033;font-weight:650; }
@@ -274,21 +293,19 @@ class BankAssistant extends HTMLElement {
         <header class="ba-header"><div class="ba-mark" aria-hidden="true">B</div><div class="ba-heading" data-role="title"></div><div class="ba-head-actions"><button data-role="new-chat" type="button" aria-label="New chat" title="New chat">＋</button><button data-role="more" type="button" aria-label="More options" aria-expanded="false">…</button><button data-role="minimize" type="button" aria-label="Minimize assistant" title="Minimize">×</button></div>
         <nav class="ba-menu" data-role="menu" hidden aria-label="More options"><button data-role="menu-cases" type="button"></button><button data-role="menu-help" type="button"></button></nav>
         </header>
-        <section class="ba-home" data-role="home"><div class="ba-welcome"><h2 data-role="welcome" tabindex="-1"></h2><p data-role="welcome-hint"></p></div><div data-role="context-card" class="ba-context" hidden><button data-role="context-button" type="button"><strong data-role="context-title"></strong><small data-role="context-copy"></small></button></div><label class="ba-search"><span aria-hidden="true">⌕</span><input data-role="topic-search" type="search" aria-label="Search help topics" /></label><h3 data-role="topics-title"></h3><p data-role="topics-loading" aria-live="polite" hidden></p><div data-role="topics" aria-live="polite" aria-busy="false"></div><p class="ba-empty" data-role="topics-empty" hidden></p></section>
+        <section class="ba-home" data-role="home"><div class="ba-welcome"><p class="ba-welcome-name" data-role="welcome-name"></p><h2 data-role="welcome" tabindex="-1"></h2><p data-role="welcome-hint"></p></div><div data-role="context-card" class="ba-context" hidden><button data-role="context-button" type="button"><strong data-role="context-title"></strong><small data-role="context-copy"></small></button></div><label class="ba-search"><span aria-hidden="true">⌕</span><input data-role="topic-search" type="search" aria-label="Search help topics" /></label><h3 data-role="topics-title"></h3><p data-role="topics-loading" aria-live="polite" hidden></p><div data-role="topics" aria-live="polite" aria-busy="false"></div><p class="ba-empty" data-role="topics-empty" hidden></p></section>
         <div class="ba-body" data-role="body">
-        <button data-role="my-cases-button" type="button"></button>
-        <section data-role="my-cases-panel" hidden>
-          <h3 data-role="my-cases-title" tabindex="-1"></h3>
+        <section class="ba-cases" data-role="my-cases-panel" hidden>
+          <div class="ba-cases-head"><div><h2 data-role="my-cases-title" tabindex="-1"></h2><p data-role="my-cases-hint"></p></div><button data-role="my-cases-close" type="button"></button></div>
           <p data-role="my-cases-loading" aria-live="polite"></p>
           <p data-role="my-cases-error" aria-live="polite"></p>
           <p data-role="my-cases-empty" hidden></p>
-          <ul data-role="my-cases-list"></ul>
-          <div data-role="my-case-detail" hidden>
+          <ul class="ba-case-list" data-role="my-cases-list"></ul>
+          <div class="ba-case-detail" data-role="my-case-detail" hidden>
             <p data-role="my-case-detail-text"></p>
             <button data-role="my-case-open-chat" type="button" hidden></button>
-            <button data-role="my-case-back" type="button"></button>
+            <button class="ba-case-back" data-role="my-case-back" type="button"></button>
           </div>
-          <button data-role="my-cases-close" type="button"></button>
         </section>
         <div data-role="case-banner" hidden>
           <strong data-role="case-state"></strong>
@@ -389,8 +406,7 @@ class BankAssistant extends HTMLElement {
     this.q('draft-back').addEventListener('click', () => this.showDraftStep('edit'));
     this.q('draft-discard').addEventListener('click', () => this.closeDraft());
     this.q('draft-skip').addEventListener('click', () => { this.closeDraft(); this.startHandoff(); });
-    this.q('my-cases-button').addEventListener('click', () => this.showMyCases());
-    this.q('my-cases-close').addEventListener('click', () => { this.q('my-cases-panel').hidden = true; });
+    this.q('my-cases-close').addEventListener('click', () => { this.q('my-cases-panel').hidden = true; delete this.q('root').dataset.casesOpen; this.q('more').focus(); });
     this.q('my-case-back').addEventListener('click', () => this.showCaseList());
     this.q('solved-yes').addEventListener('click', () => this.answerSolved(true));
     this.q('solved-no').addEventListener('click', () => this.answerSolved(false));
@@ -399,7 +415,7 @@ class BankAssistant extends HTMLElement {
   }
 
   attributeChangedCallback() {
-    if (this.q) this.applyBranding();
+    if (this.q) { this.applyBranding(); this.renderWelcomeName(); }
   }
 
   // Branding is data on the host tag; tenant identity never selects code or relaxes service policy.
@@ -414,6 +430,12 @@ class BankAssistant extends HTMLElement {
     else this.style.removeProperty('--ba-brand-primary');
     if (secondary) this.style.setProperty('--ba-brand-secondary', secondary);
     else this.style.removeProperty('--ba-brand-secondary');
+  }
+
+  renderWelcomeName() {
+    const hostName = typeof this.getCustomerName === 'function' ? this.getCustomerName() : this.getAttribute('customer-name');
+    const name = typeof hostName === 'string' ? hostName.replace(/[\r\n\u0000-\u001f]/g, ' ').trim().slice(0, 60) : '';
+    this.q('welcome-name').textContent = TEXT[this.lang].welcomeName(name);
   }
 
   disconnectedCallback() {
@@ -443,6 +465,7 @@ class BankAssistant extends HTMLElement {
     this.q('minimize').setAttribute('aria-label', t.minimize);
     this.q('welcome').textContent = t.welcome;
     this.q('welcome-hint').textContent = t.welcomeHint;
+    this.renderWelcomeName();
     this.q('topics-title').textContent = t.helpTopics;
     this.q('topic-search').placeholder = t.searchTopics;
     this.q('topic-search').setAttribute('aria-label', t.searchTopics);
@@ -456,8 +479,8 @@ class BankAssistant extends HTMLElement {
     this.q('pin-submit').textContent = t.pinSubmit;
     this.q('human-chip').textContent = t.human;
     this.q('human-chip').setAttribute('aria-label', t.human);
-    this.q('my-cases-button').textContent = t.myCases;
     this.q('my-cases-title').textContent = t.myCases;
+    this.q('my-cases-hint').textContent = t.myCasesHint;
     this.q('my-cases-empty').textContent = t.myCasesEmpty;
     this.q('my-case-open-chat').textContent = t.caseOpenChat;
     this.q('my-case-back').textContent = t.caseListBack;
@@ -514,6 +537,7 @@ class BankAssistant extends HTMLElement {
   }
 
   showHome() {
+    delete this.q('root').dataset.casesOpen;
     this.chatActive = false;
     this.q('home').hidden = false;
     this.q('body').dataset.active = 'false';
@@ -563,6 +587,7 @@ class BankAssistant extends HTMLElement {
       this.topics = Array.isArray(data.topics) ? data.topics.filter((item) => typeof item.key === 'string' && typeof item.title === 'string') : [];
       this.contextTopic = data.context?.topics?.[0] ?? null;
       this.contextLabel = data.context?.label ?? '';
+      this.contextDescription = data.context?.description ?? '';
       this.finishTopicLoad();
     } catch { this.topics = []; this.contextTopic = null; this.finishTopicLoad(); }
   }
@@ -591,8 +616,8 @@ class BankAssistant extends HTMLElement {
     const context = this.q('context-card');
     context.hidden = !this.contextTopic;
     if (this.contextTopic) {
-      this.q('context-title').textContent = `${TEXT[this.lang].quickOverview} ${this.contextLabel}`;
-      this.q('context-copy').textContent = this.contextTopic.title;
+      this.q('context-title').textContent = `${TEXT[this.lang].quickHelp} ${this.contextLabel}`;
+      this.q('context-copy').textContent = this.contextDescription || this.contextTopic.title;
     }
   }
 
@@ -723,6 +748,7 @@ class BankAssistant extends HTMLElement {
     const t = TEXT[this.lang];
     this.q('home').hidden = true;
     this.q('body').dataset.active = 'true';
+    this.q('root').dataset.casesOpen = 'true';
     this.q('my-cases-panel').hidden = false;
     this.q('my-case-detail').hidden = true;
     this.q('my-cases-list').hidden = false;
@@ -764,12 +790,20 @@ class BankAssistant extends HTMLElement {
     row.dataset.role = 'my-case';
     const ref = document.createElement('strong');
     ref.textContent = String(c.ref);
+    ref.className = 'ba-case-ref';
     const state = document.createElement('span');
     state.dataset.role = 'my-case-state';
+    state.dataset.state = c.state;
+    state.className = 'ba-case-state';
     state.textContent = t.caseStates[c.state] ?? '';
+    const meta = document.createElement('span');
+    meta.className = 'ba-case-meta';
+    meta.append(this.stamp(t.caseOpened, c.openedAt));
     // An emailed-only case has no chat to follow: say so, and show no "last update" that would suggest otherwise.
-    row.append(ref, ' ', state, ' ', this.stamp(t.caseOpened, c.openedAt));
-    if (c.state === 'emailed') { const note = document.createElement('small'); note.textContent = ` ${t.caseEmailedNote}`; row.append(note); } else row.append(' ', this.stamp(t.caseUpdated, c.updatedAt));
+    if (c.state === 'emailed') { const note = document.createElement('small'); note.textContent = t.caseEmailedNote; meta.append(note); } else meta.append(this.stamp(t.caseUpdated, c.updatedAt));
+    row.className = 'ba-case-card';
+    row.setAttribute('aria-label', `${c.ref}, ${t.caseStates[c.state] ?? ''}`);
+    row.append(ref, state, meta);
     row.addEventListener('click', () => this.showCase(c.ref));
     li.append(row);
     return li;
@@ -795,6 +829,7 @@ class BankAssistant extends HTMLElement {
   // Returns to the chat of an open case: the banner, the agent's messages and the polling carry on from there.
   async openCaseChat(conversationId) {
     if (typeof conversationId !== 'string') return;
+    delete this.q('root').dataset.casesOpen;
     this.q('my-cases-panel').hidden = true;
     this.q('home').hidden = true;
     this.q('body').dataset.active = 'true';

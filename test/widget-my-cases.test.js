@@ -49,7 +49,7 @@ async function widgetFor(svc, t, c, { lang, withCli = true } = {}) {
   return w;
 }
 const rows = (w) => w.qa('my-case');
-const openList = async (w) => { w.q('my-cases-button').click(); await w.until(() => !w.q('my-cases-panel').hidden && !w.q('my-cases-loading').textContent); };
+const openList = async (w) => { w.q('more').click(); w.q('menu-cases').click(); await w.until(() => !w.q('my-cases-panel').hidden && !w.q('my-cases-loading').textContent); };
 
 test('asking for help while viewing My cases gives verified guidance for the case list', async (t) => {
   const model = createFakeModel((request) => {
@@ -93,7 +93,9 @@ test('"My cases" lists the customer\'s own cases newest first: reference, opened
 
   await openList(w);
 
+  assert.equal(w.q('root').dataset.casesOpen, 'true', 'My cases gets its own panel surface instead of appearing inside the transcript');
   assert.equal(rows(w).length, 2, 'only the two cases of this customer');
+  assert.ok(rows(w)[0].classList.contains('ba-case-card'), 'cases are shown as separate selectable cards');
   assert.match(rows(w)[0].textContent, new RegExp(second.ref));
   assert.match(rows(w)[0].textContent, /waiting for an agent/i);
   assert.match(rows(w)[1].textContent, new RegExp(first.ref));
@@ -216,7 +218,7 @@ test('the list is in French when the widget is', async (t) => {
 
   await openList(w);
 
-  assert.match(w.q('my-cases-button').textContent, /mes dossiers/i);
+  assert.match(w.q('my-cases-title').textContent, /mes dossiers/i);
   assert.match(rows(w)[0].textContent, /e-mail à l'assistance/i);
   assert.match(rows(w)[0].textContent, /ne peut pas être suivi/i);
   assert.match(rows(w)[1].textContent, /en attente d'un agent/i);

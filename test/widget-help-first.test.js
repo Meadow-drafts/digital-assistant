@@ -7,10 +7,11 @@ import { createGuideModel } from './harness/guide-model.js';
 import { GUIDES } from './harness/t1-helpers.js';
 import { loadGuides } from '../src/guides.js';
 
-async function signedWidget(t, { gating = { usePackages: false }, path = '/', customerCatalogue = [] } = {}) {
+async function signedWidget(t, { gating = { usePackages: false }, path = '/', customerCatalogue = [], contextRoutes = {} } = {}) {
   const customer = alice();
   const guides = loadGuides(GUIDES);
   for (const key of customerCatalogue) guides.get(key).customerCatalogue = true;
+  for (const [key, route] of Object.entries(contextRoutes)) guides.get(key).route = route;
   const svc = await start({ customers: [customer], guides, model: createGuideModel({ picks: ['dashboard'], answer: ['Here are the verified steps.'] }) });
   t.after(svc.close);
   const w = await openWidget(svc.baseUrl, path);
@@ -44,6 +45,28 @@ test('the public widget starts as a floating launcher and opens a labelled panel
   assert.ok(el);
 });
 
+test('the welcome greets the host supplied customer and the conversation keeps cases in More only', async (t) => {
+  const { w } = await signedWidget(t);
+  const el = w.document.querySelector('bank-assistant');
+  el.getCustomerName = () => 'Amina';
+  el.setAttribute('customer-name', 'host supplied');
+  assert.equal(w.q('welcome-name').textContent, 'Welcome, Amina');
+  assert.equal(w.q('my-cases-button'), null);
+  assert.ok([...w.q('menu').querySelectorAll('button')].some((button) => button.dataset.role === 'menu-cases'));
+});
+
+test('the search focus uses a soft focus treatment and contextual help describes the current route', async (t) => {
+  const { w } = await signedWidget(t, { customerCatalogue: ['dashboard', 'transfer-single'], contextRoutes: { dashboard: '/history' } });
+  w.dom.window.history.pushState({}, '', '/history');
+  await w.until(() => w.q('topics').getAttribute('aria-busy') === 'false');
+  assert.equal(w.q('context-title').textContent, 'Quick help for History');
+  assert.equal(w.q('context-copy').textContent, 'Find and review your transactions');
+  const styles = w.document.querySelector('bank-assistant style').textContent;
+  assert.match(styles, /\.ba-search:focus-within[^}]*box-shadow/);
+  assert.match(styles, /\.ba-compose form:focus-within[^}]*box-shadow/);
+  assert.doesNotMatch(styles, /input:focus-visible\s*\{\s*outline:3px solid #e7a563/);
+});
+
 test('eligible catalogue filtering happens before search, and route context refreshes after navigation', async (t) => {
   const { w } = await signedWidget(t, {
     gating: { usePackages: true, pack: { natureCodes: ['HIST'] } },
@@ -55,7 +78,7 @@ test('eligible catalogue filtering happens before search, and route context refr
   await w.until(() => w.q('topics').getAttribute('aria-busy') === 'false');
   assert.equal(w.q('context-card').hidden, false);
   assert.match(w.q('context-title').textContent, /Overview/);
-  assert.equal(w.q('context-copy').textContent, 'Overview: see your balance and spending');
+  assert.equal(w.q('context-copy').textContent, 'See balance and recent activity guidance');
 
   w.dom.window.history.pushState({}, '', '/transfer');
   await w.until(() => w.q('context-card').hidden);
