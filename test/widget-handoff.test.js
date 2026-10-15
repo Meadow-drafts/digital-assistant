@@ -55,13 +55,13 @@ test('while waiting, assistant replies are labelled as automated replies', async
   const svc = await startService({ model: createFakeModel(['Hi there.', 'Open Transfers.']) });
   t.after(svc.close);
   const w = await askForAgent(svc, t);
-
   await w.send('How do I pay a bill?');
   await w.until(() => w.qa('message').filter((m) => m.dataset.from === 'assistant').length === 2);
 
   assert.equal(w.qa('automated-label').length, 1);
   assert.match(w.q('automated-label').textContent, /automated reply/i);
-  assert.equal(w.q('automated-label').nextElementSibling.textContent, 'Open Transfers.');
+  assert.ok(w.q('automated-label').closest('[data-role="message"]'), 'the small label belongs inside its assistant response bubble');
+  assert.match(w.q('automated-label').parentElement.textContent, /Open Transfers\./);
 });
 
 test('once an agent claims, the banner shows the agent first name and a human agent badge, and the bot is muted', async (t) => {
@@ -103,7 +103,7 @@ test('the agent\'s messages arrive in the same chat, marked as the human agent',
   await w.until(() => w.qa('message').some((m) => m.dataset.from === 'agent'));
 
   const message = w.qa('message').find((m) => m.dataset.from === 'agent');
-  assert.equal(message.textContent, 'Hello, I am looking at your transfer now.');
+  assert.equal(message.querySelector('[data-role="message-content"]').textContent, 'Hello, I am looking at your transfer now.');
   assert.equal(w.qa('message').filter((m) => m.dataset.from === 'agent').length, 1, 'each message shown once, not on every poll');
 });
 
@@ -125,6 +125,28 @@ test('after resolution the customer sees "Was this solved?" and can answer', asy
   w.q('solved-yes').click();
   await w.until(() => w.q('solved-prompt').hidden);
   assert.deepEqual(svc.audit.records.filter((e) => e.outcome === 'case_feedback').map((e) => e.solved), [true]);
+});
+
+test('answering "No" is a button that goes to the service and brings the same case back with its agent', async (t) => {
+  const svc = await startService({ model: createFakeModel(['Hi there.']) });
+  t.after(svc.close);
+  const w = await askForAgent(svc, t);
+  const ref = refOf(w);
+  const aline = await agentLogin(svc.baseUrl, 'aline');
+  await aline.claim(ref);
+  await aline.resolve(ref);
+  await w.until(() => w.q('solved-prompt') && !w.q('solved-prompt').hidden);
+
+  const no = w.q('solved-no');
+  assert.equal(no.tagName, 'BUTTON');
+  assert.match(no.textContent, /^no$/i);
+  no.click();
+  await w.until(() => w.q('solved-prompt').hidden && !w.q('case-banner').hidden);
+
+  assert.deepEqual(svc.audit.records.filter((e) => e.outcome === 'case_feedback').map((e) => [e.caseRef, e.solved]), [[ref, false]]);
+  assert.equal(refOf(w), ref, 'the same case, not a new one');
+  assert.match(w.q('case-state').textContent, /with an agent/i);
+  assert.equal((await aline.open(ref)).body.state, 'with_agent');
 });
 
 test('in French the banner, notice and prompt are French', async (t) => {
@@ -172,4 +194,26 @@ test('after 15 minutes unclaimed the banner tells the customer the case is queue
   assert.match(w.q('case-notice').textContent, /email/i);
   assert.match(w.q('case-notice').textContent, /within 24 hours/i, 'the honest expectation stays');
   assert.ok(w.q('case-cancel'), 'the case is still open and can be cancelled');
+});
+
+test('case state changes and timers do not send unsolicited status nudges', async (t) => {
+  const svc = await startService({ model: createFakeModel(['Hi there.']) });
+  t.after(svc.close);
+  const w = await askForAgent(svc, t);
+  const aline = await agentLogin(svc.baseUrl, 'aline');
+  await aline.claim(refOf(w));
+  await w.until(() => /with an agent/i.test(w.q('case-state').textContent));
+
+  await svc.clock.advance(10 * 60_000);
+  await aline.transfer(refOf(w), 'paul');
+  await svc.clock.advance(30 * 60_000);
+  await w.until(() => w.q('case-agent-name').textContent === 'Paul');
+  const paul = await agentLogin(svc.baseUrl, 'paul');
+  await paul.resolve(refOf(w));
+  await w.until(() => w.q('case-banner').hidden);
+
+  assert.equal(w.qa('message').filter((m) => m.dataset.from === 'agent').length, 0, 'no agent bubble was invented');
+  assert.deepEqual(w.qa('case-note'), [], 'claim, silence, transfer and resolution do not add status messages to chat');
+  assert.doesNotMatch(w.document.body.textContent, /still working on it|taking longer than expected|passed to a colleague|Case C-\d+ resolved/i);
+  assert.doesNotMatch(w.document.body.textContent, /Aline Mbarga|Paul Etoga/);
 });

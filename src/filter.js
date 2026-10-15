@@ -30,7 +30,9 @@ export function createOutputFilter({ allowlist = {}, protectedTexts = [] } = {})
   // Returns the first reason the text is blocked, or null when it is clean. `known` lists strings the customer
   // supplied themselves (a transfer reference whose digits can look like a phone number); they are ignored
   // for the URL, email and phone checks and for nothing else.
-  return function check(fullText, { known = [] } = {}) {
+  return function check(fullText, { known = [], typed = '' } = {}) {
+    // Numbers the customer typed in this very message may be repeated back to them; any other number still may not.
+    const typedNumbers = new Set((String(typed).match(PHONE) ?? []).map(digits));
     let text = fullText;
     for (const k of known) text = text.replaceAll(new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), ' ');
     const urls = text.match(URL_) ?? [];
@@ -38,8 +40,9 @@ export function createOutputFilter({ allowlist = {}, protectedTexts = [] } = {})
     let rest = text.replace(URL_, ' ');
     const found = rest.match(EMAIL) ?? [];
     if (found.some((e) => !okEmails.has(e.toLowerCase()))) return 'email';
-    rest = rest.replace(EMAIL, ' ');
-    if ((rest.match(PHONE) ?? []).some((p) => !okPhones.has(digits(p)))) return 'phone';
+    // An ISO date is not a phone number, but its digits run into a following amount.
+    rest = rest.replace(EMAIL, ' ').replace(/\b\d{4}-\d{2}-\d{2}(?:T[\d:.]+)?/g, ' ');
+    if ((rest.match(PHONE) ?? []).some((p) => !okPhones.has(digits(p)) && !typedNumbers.has(digits(p)))) return 'phone';
     const w = words(fullText);
     for (let i = 0; i + ECHO_WORDS <= w.length; i++) if (shingles.has(w.slice(i, i + ECHO_WORDS).join(' '))) return 'prompt_echo';
     return null;

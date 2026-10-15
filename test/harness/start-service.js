@@ -1,3 +1,4 @@
+import './session-fetch.js';
 import { createService } from '../../src/service.js';
 import { createFakeModel } from './fake-model.js';
 import { createFakeGateway } from './fake-gateway.js';
@@ -22,10 +23,14 @@ export async function startService(overrides = {}) {
     // Timers and opening hours are the real placeholder config; the roster is the test one above.
     support: loadSupport(new URL('../../config/support.json', import.meta.url)),
     consoleUrl: CONSOLE_URL,
+    // Lifecycle tests move the clock by days; the customer session id (8 hours by default) must outlive them.
+    // Tests about session expiry pass their own sessionTtlMs.
+    sessionTtlMs: 1000 * 60 * 60_000,
     ...overrides,
   };
   const server = createService(deps);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
-  return { ...deps, server, baseUrl, close: () => new Promise((r) => { server.closeAllConnections?.(); server.close(r); }) };
+  // Let in-flight console polls finish after jsdom closes; destroying their sockets makes fetch reject asynchronously in the test.
+  return { ...deps, server, baseUrl, close: () => new Promise((r) => server.close(r)) };
 }

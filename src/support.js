@@ -2,8 +2,11 @@ import { readFileSync } from 'node:fs';
 
 // Support configuration: the agent roster, who is on call, every timer, opening hours and how mail is sent.
 // Nothing here has a default in code; the bank edits config/support.json (placeholder values from ticket 07).
+const ADDRESS = /^[^\s<>,;"@]+@[^\s<>,;"@]+$/;
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const fail = (what) => { throw new Error(`support config: ${what}`); };
+// Every timer the support flow reads. Placeholder values from ticket 07; the bank replaces them.
+const TIMER_KEYS = ['broadcastMs', 'queuedNoticeMs', 'absentMs', 'agentSilenceMs', 'agentFollowUpMs', 'autoResolveMs', 'reopenWindowMs'];
 const positive = (v) => Number.isFinite(v) && v > 0;
 
 export function loadSupport(path) {
@@ -16,11 +19,14 @@ export function loadSupport(path) {
   }
   const onCall = raw.agents?.onCall;
   if (!Array.isArray(onCall) || !onCall.every((id) => list.some((a) => a.id === id))) fail('agents.onCall must list ids from agents.list');
+  const auditReaders = raw.agents?.auditReaders ?? [];
+  if (!Array.isArray(auditReaders) || !auditReaders.every((id) => list.some((a) => a.id === id))) fail('agents.auditReaders must list ids from agents.list');
   const sessionMs = raw.agents?.sessionMs ?? 8 * 60 * 60_000;
   if (!positive(sessionMs)) fail('agents.sessionMs must be a positive number');
 
   const timers = raw.timers ?? {};
-  for (const k of ['broadcastMs', 'queuedNoticeMs', 'absentMs']) if (!positive(timers[k])) fail(`timers.${k} must be a positive number`);
+  for (const k of TIMER_KEYS) if (!positive(timers[k])) fail(`timers.${k} must be a positive number`);
+  if (timers.agentFollowUpMs <= timers.agentSilenceMs) fail('timers.agentFollowUpMs must be later than timers.agentSilenceMs');
 
   const h = raw.hours ?? {};
   if (!Number.isInteger(h.utcOffsetMinutes) || Math.abs(h.utcOffsetMinutes) > 14 * 60) fail('hours.utcOffsetMinutes must be whole minutes from UTC');
@@ -29,10 +35,11 @@ export function loadSupport(path) {
 
   const mail = raw.mail ?? {};
   if (!['log', 'smtp'].includes(mail.mode)) fail('mail.mode must be "log" or "smtp"');
+  if (typeof mail.supportAddress !== 'string' || !ADDRESS.test(mail.supportAddress)) fail('mail.supportAddress must be the support team\'s email address');
 
   return {
-    agents: { list, onCall, sessionMs },
-    timers: { broadcastMs: timers.broadcastMs, queuedNoticeMs: timers.queuedNoticeMs, absentMs: timers.absentMs },
+    agents: { list, onCall, auditReaders, sessionMs },
+    timers: Object.fromEntries(TIMER_KEYS.map((k) => [k, timers[k]])),
     hours: { utcOffsetMinutes: h.utcOffsetMinutes, days: h.days, open: h.open, close: h.close },
     mail,
   };

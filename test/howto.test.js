@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { startService } from './harness/start-service.js';
 import { createGuideModel } from './harness/guide-model.js';
+import { createFakeModel } from './harness/fake-model.js';
 import { chatTurn } from './harness/sse.js';
 import { loadGuides } from '../src/guides.js';
 
@@ -83,6 +84,45 @@ test('features the portal does not offer are answered from the unsupported list,
   assert.match(replyOf(events), /^The portal does not save beneficiaries\./);
   assert.deepEqual(events.find((e) => e.type === 'guides').guides, []);
   assert.equal(svc.failedQuestions.records.length, 0);
+});
+
+test('the router is told what the unsupported list covers, so it can pick it for those questions', async (t) => {
+  const model = createGuideModel({ picks: [] });
+  const svc = await start({ model });
+  t.after(svc.close);
+
+  await chatTurn(svc.baseUrl, { message: 'Add a beneficiary', tenant: 'demo' });
+
+  const router = model.calls.find((c) => c.purpose === 'route').messages[0].content;
+  const entry = router.split('\n').find((line) => line.startsWith('unsupported:'));
+  for (const topic of ['Saved beneficiaries', 'International transfer', 'Card actions']) assert.ok(entry.includes(topic), `${topic} is not in: ${entry}`);
+});
+
+test('a question about an unavailable feature is answered from the unsupported list even when the router picks a real guide or none', async (t) => {
+  for (const [message, picks] of [['Add a beneficiary', ['transfer-single']], ['Bloquer ma carte perdue', []], ['How do I make an international transfer?', ['transfer-remittance']]]) {
+    const model = createGuideModel({ picks, answer: ['Not available in the portal.'] });
+    const svc = await start({ model });
+    t.after(svc.close);
+
+    const { events } = await chatTurn(svc.baseUrl, { message, tenant: 'demo' });
+
+    assert.match(JSON.stringify(answerCalls(model)[0].messages), /NOT AVAILABLE IN THE PORTAL/, message);
+    assert.doesNotMatch(JSON.stringify(answerCalls(model)[0].messages), /## Steps|## Étapes/, message);
+    assert.deepEqual(events.find((e) => e.type === 'guides').guides, [], message);
+    assert.equal(events.filter((e) => e.type === 'action_card').length, 0, message);
+    assert.equal(svc.failedQuestions.records.length, 0, message);
+  }
+});
+
+test('a refusal from the router is not overridden by the unavailable-feature rule', async (t) => {
+  const model = createFakeModel((request) => (request.purpose === 'route' ? '[[refusal:other_user_data]]' : ['No.']));
+  const svc = await start({ model });
+  t.after(svc.close);
+
+  const { events } = await chatTurn(svc.baseUrl, { message: "Block my colleague Marie's lost card", tenant: 'demo' });
+
+  assert.equal(events.find((e) => e.type === 'refusal').category, 'other_user_data');
+  assert.doesNotMatch(JSON.stringify(model.calls.filter((c) => c.purpose !== 'route')), /NOT AVAILABLE IN THE PORTAL/);
 });
 
 test('guides blocked by package, role or secondary connect are neither offered nor usable', async (t) => {

@@ -1,0 +1,25 @@
+{
+ "model": "gemini-3.8-flash",
+ "language": "fr",
+ "items": {
+  "H1": {
+   "group": "how-to",
+   "prompt": "Comment envoyer de l'argent sur le compte d'une autre personne ?",
+   "error": true,
+   "reason": "The operation was aborted due to timeout"
+  },
+  "H2": {
+   "group": "how-to",
+   "prompt": "Je veux envoyer vers un wallet mais ça refuse",
+   "error": true,
+   "reason": "The operation was aborted due to timeout"
+  },
+  "H3": {
+   "group": "how-to",
+   "prompt": "Comment payer 30 employés en une seule fois ?",
+   "error": true,
+   "reason": "The operation was aborted due to timeout"
+  }
+ },
+ "updatedAt": "2026-10-13T13:01:49.904Z"
+}

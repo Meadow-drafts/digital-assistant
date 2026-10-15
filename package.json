@@ -7,10 +7,13 @@
   "scripts": {
     "start": "node src/index.js",
     "test": "node --test \"test/**/*.test.js\"",
-    "check:guides": "node scripts/check-guides.js"
+    "check:guides": "node scripts/check-guides.js",
+    "eval": "node eval/cli.js",
+    "scoreboard": "node eval/scoreboard-cli.js",
+    "replay": "node replay/cli.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.13"
   },
   "devDependencies": {
     "jsdom": "^29.1.1"

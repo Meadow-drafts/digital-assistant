@@ -3,7 +3,7 @@ id: merchant-tools
 audience: merchant (alias set for Cash Out)
 route: /merchants and /request-to-pay
 package: CAIN, CADW, CADA, CAOUT, GPAY
-verified-on: DRAFT 2026-10-12, code read only, owner to validate
+verified-on: 2026-10-14, bank approval confirmed by user
 ---
 # Merchant tools: cash in, cash out, generate a QR code, consume a voucher
 

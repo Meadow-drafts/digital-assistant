@@ -46,6 +46,19 @@ export const maskAccount = (v) => (digits(v).length >= 4 ? `****${digits(v).slic
 export const maskPhone = (v) => (digits(v).length >= 4 ? `******${digits(v).slice(-3)}` : null);
 export const initials = (name) => String(name ?? '').trim().split(/\s+/).filter(Boolean).map((w) => `${[...w][0].toUpperCase()}.`).join(' ') || null;
 
+// The portal's History table shows `dou1` as "Date"; real rows often have `dop` null. Same order here.
+const rowDate = (r) => dateOf(r?.dou1 ?? r?.dmo ?? r?.dop);
+// With the time, as the portal's table shows it (customer's screen only).
+const rowDateTime = (r) => String(r?.dou1 ?? r?.dmo ?? r?.dop ?? '').replace('T', ' ').slice(0, 19) || null;
+
+// Carries the unmasked rows for the customer's screen. A symbol key is skipped by JSON.stringify, so the model
+// input and the audit record (both built from the JSON of the result) can never include it.
+export const DISPLAY = Symbol('display');
+
+// "Type" on the portal's History page comes from `service`: emission (money leaving) or acquisition.
+const TYPE = { BANK: 'emission', GIMAC: 'emission', 'GIMAC-EMI': 'emission', 'GIMAC-ACQ': 'acquisition', GIMACACQUISITION: 'acquisition' };
+const typeOf = (service) => TYPE[service] ?? (String(service ?? '').trim() || null);
+
 function dateOf(v) {
   if (typeof v === 'number') return new Date(v).toISOString().slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}/.exec(String(v ?? ''))?.[0] ?? null;
@@ -69,20 +82,55 @@ function statusDetail(r) {
   };
 }
 
-const involves = (r, wallet) => r?.codewaldo === wallet || r?.codewalop === wallet;
+const involves = (r, wallet) => r?.codewaldo?.trim() === wallet || r?.codewalop?.trim() === wallet;
 
-function maskTransaction(r, wallet) {
-  const out = r.codewaldo === wallet;
+// The table shows ntrans or nhis, not clientReferenceId, so any of the three finds a row.
+const withReference = (rows, reference) => {
+  const wanted = reference.toLowerCase();
+  return rows.find((r) => [r.clientReferenceId, r.ntrans, r.nhis].some((id) => String(id ?? '').toLowerCase() === wanted));
+};
+
+// `natures` maps a nature code (nat) to { en, fr }, from the portal's nomenclature 6000; a code with no entry
+// is shown as the code.
+const natureOf = (r, natures) => {
+  const code = String(r.nat ?? r.top ?? '').trim() || null;
+  const found = code ? natures?.[code] : null;
+  return { code, en: found?.en ?? code, fr: found?.fr ?? found?.en ?? code };
+};
+
+function maskTransaction(r, wallet, natures) {
+  const out = r.codewaldo?.trim() === wallet;
   return {
-    reference: r.clientReferenceId ?? r.ntrans ?? null,
-    date: dateOf(r.dop),
+    reference: r.clientReferenceId || r.ntrans || null,
+    date: rowDate(r),
     amount: r.mtrans ?? null,
     currency: r.dev ?? null,
     direction: out ? 'out' : 'in',
-    type: r.nat ?? r.top ?? null,
+    nature: natureOf(r, natures),
+    type: typeOf(r.service),
     status: STATUS[Number(r.sta)] ?? 'unknown',
     account: maskAccount(out ? r.dcpt : r.ccpt),
     counterparty: r.partnerlib ? initials(r.partnerlib) : maskPhone(out ? r.telop : r.teldo),
+  };
+}
+
+// What the customer sees on their own screen, laid out as the portal's History table: Date, Id, From, To,
+// Member, Nature, Type, Amount, Status. Full values, because it is their own data on their own screen; it never
+// goes to the model or the audit log (see DISPLAY).
+function displayTransaction(r, wallet, natures) {
+  const out = r.codewaldo?.trim() === wallet;
+  return {
+    date: rowDateTime(r),
+    id: r.ntrans ?? null,
+    from: String(r.codewaldo ?? '').trim() || null,
+    to: String(r.codewalop || r.ccpt || '').trim() || null,
+    member: r.partnerlib && r.partnerid ? `${r.partnerlib} [${r.partnerid}]` : r.partnerlib || null,
+    nature: natureOf(r, natures),
+    type: typeOf(r.service),
+    amount: r.mtrans ?? null,
+    currency: r.dev ?? null,
+    status: STATUS[Number(r.sta)] ?? 'unknown',
+    direction: out ? 'out' : 'in',
   };
 }
 
@@ -97,6 +145,7 @@ const TOOLS = {
     allowed: ['count'],
   },
   transfer_status: {
+    packages: ['HIST'],
     allowed: ['reference'],
     args: (a) => (typeof a.reference === 'string' && REFERENCE.test(a.reference) ? { reference: a.reference } : null),
   },
@@ -218,14 +267,23 @@ export function createT1({ gateway, clock, etab = ETAB }) {
     }
   }
 
-  // The status row for a reference, only if it is this session's wallet's. The backend looks the reference up
-  // across everyone, so any other row is treated exactly like a missing one.
-  async function ownStatus(session, reference, ctx) {
-    const body = await call(ctx.tenant, ctx.token, {
-      method: 'GET', path: '/digitalbank/history/transactions',
-      query: { cli: session.cli, clientRefId: reference }, // as the portal asks
-    });
-    return body?.data && involves(body.data, session.wallet) ? body.data : null;
+  // Nature labels (nomenclature 6000, the same table the portal's History page uses): code -> { en, fr }. Shared
+  // bank reference data, not customer data. If it cannot be read the codes are shown instead; never an error.
+  const natureCache = new Map(); // tenant -> { at, map }
+  async function natureLabels(ctx) {
+    const hit = natureCache.get(ctx.tenant);
+    if (hit && clock.now() - hit.at < 3_600_000) return hit.map;
+    try {
+      const body = await call(ctx.tenant, ctx.token, { method: 'GET', path: '/iwomicore/getNomenDataByTabcd/6000' });
+      const list = Array.isArray(body?.data) ? body.data : Array.isArray(body) ? body : [];
+      const map = {};
+      for (const n of list) if (n?.lib1 && n?.lib2) map[String(n.lib1).trim()] = { en: String(n.lib2), fr: String(n.lib6 || n.lib2) };
+      natureCache.set(ctx.tenant, { at: clock.now(), map });
+      return map;
+    } catch (e) {
+      if (e instanceof SessionExpired) throw e;
+      return {};
+    }
   }
 
   // The customer's own rows from the wallet-scoped history list, the same list the portal shows.
@@ -252,19 +310,22 @@ export function createT1({ gateway, clock, etab = ETAB }) {
     },
     async last_transactions(session, { count }, ctx) {
       const own = await ownRows(session, ctx);
-      own.sort((a, b) => String(dateOf(b.dop)).localeCompare(String(dateOf(a.dop))));
-      return { transactions: own.slice(0, count).map((r) => maskTransaction(r, session.wallet)) };
+      own.sort((a, b) => String(rowDate(b)).localeCompare(String(rowDate(a))));
+      const natures = await natureLabels(ctx);
+      const shown = own.slice(0, count);
+      return { transactions: shown.map((r) => maskTransaction(r, session.wallet, natures)), [DISPLAY]: { transactions: shown.map((r) => displayTransaction(r, session.wallet, natures)) } };
     },
     async transfer_status(session, { reference }, ctx) {
-      const found = await ownStatus(session, reference, ctx);
-      return found ? { found: true, transaction: maskTransaction(found, session.wallet) } : { found: false, reference };
+      // Same lookup as explain_failure: the customer's own history list, never the by-reference endpoint (slow, and it
+      // answers differently for someone else's reference than for an unknown one).
+      const found = withReference(await ownRows(session, ctx), reference);
+      return found ? { found: true, transaction: { ...maskTransaction(found, session.wallet), reference } } : { found: false, reference }; // the id the customer typed
     },
     async explain_failure(session, { reference }, ctx) {
       // The table shows ntrans or nhis, not clientReferenceId, so any of the three finds it. Only the customer's own
       // list is searched: the by-reference endpoint can take 15 s or more and would answer differently for
       // someone else's reference than for an unknown one.
-      const wanted = reference.toLowerCase();
-      const found = (await ownRows(session, ctx)).find((r) => [r.clientReferenceId, r.ntrans, r.nhis].some((id) => String(id ?? '').toLowerCase() === wanted));
+      const found = withReference(await ownRows(session, ctx), reference);
       if (!found) return { found: false, reference, outcome: 'not_found' };
       const transaction = { ...maskTransaction(found, session.wallet), reference }; // the id the customer can see
       const detail = statusDetail(found);
@@ -297,7 +358,7 @@ export function createT1({ gateway, clock, etab = ETAB }) {
       if (def.needsUnlock && !(conversation.unlock?.until > clock.now())) return { kind: 'fixed', code: 'pin_required', name: toolCall.name };
       const result = await reads[toolCall.name](session, args, { tenant: session.tenant, token });
       const notice = toolCall.name === 'last_transactions' && entitlements && !entitlements.primaryConnect ? 'primary_only' : null;
-      return { kind: 'data', name: toolCall.name, result, notice };
+      return { kind: 'data', name: toolCall.name, args, result, display: result[DISPLAY] ?? null, notice };
     } catch (e) {
       if (e instanceof Rejected) return { kind: 'fixed', code: 'rejected', reason: e.message, name: toolCall.name };
       if (e instanceof SessionExpired) {
@@ -317,9 +378,20 @@ export function createT1({ gateway, clock, etab = ETAB }) {
   // valid token. It is a UX safeguard, not a security control. The only check here is that the phone the
   // flag was set for is the session's own wallet.
   function unlockWithPortalFlag(conversation, flag) {
-    const ok = flag?.verified === '1' && digits(flag.tel) !== '' && digits(flag.tel) === digits(conversation.session.wallet);
+    const ok = portalFlagProblem(conversation, flag) === null;
     if (ok) grant(conversation);
     return ok;
+  }
+
+  // Why a portal flag is not accepted, as a shape only for the audit (never the phone itself): the flag is not "1",
+  // it names no phone, or its phone is not the session's wallet (with both digit counts, and whether the last 3 agree).
+  function portalFlagProblem(conversation, flag) {
+    if (flag?.verified !== '1') return `not_verified (flag ${typeof flag?.verified === 'string' ? `"${flag.verified.slice(0, 3)}"` : 'missing'})`;
+    const tel = digits(flag.tel);
+    const wallet = digits(conversation.session.wallet);
+    if (tel === '') return 'no_tel';
+    if (tel !== wallet) return `tel_mismatch (flag ${tel.length} digits, wallet ${wallet.length} digits, same last 3: ${tel.slice(-3) === wallet.slice(-3)})`;
+    return null;
   }
 
   // Balance unlock, path 2: the widget's own PIN box. The widget has already hashed the PIN (SHA-512 hex,
@@ -339,9 +411,9 @@ export function createT1({ gateway, clock, etab = ETAB }) {
     return { error: 'unavailable' };
   }
 
-  // The customer's own history rows for the pre-fill checks (known beneficiary, usual amount, a chosen past
-  // recipient). The raw rows stay inside the service: never given to the model, the UI or the audit. Null when
-  // they cannot be read (no session, package without history, gateway trouble), which the checks treat as unknown.
+  // The customer's own history rows for read-only answers and agent context. The raw rows stay inside the service:
+  // never given to the model, the UI or the audit. Null when they cannot be read (no session, package without history,
+  // gateway trouble).
   async function ownHistory(conversation, token, entitlements) {
     const { session } = conversation;
     if (!session) return null;
@@ -349,5 +421,28 @@ export function createT1({ gateway, clock, etab = ETAB }) {
     try { return await ownRows(session, { tenant: session.tenant, token }); } catch { return null; }
   }
 
-  return { run, start, ownHistory, unlockWithPortalFlag, unlockWithPin };
+  // The masked record of one of the customer's own transactions, for a drafted case message, with a `scrub` that
+  // hides the counterparty's name wherever the customer typed it. The real name stays in this function: only its
+  // initials come out. Null when the reference is not one of the customer's own rows or history is not readable.
+  async function caseTransaction(conversation, token, entitlements, reference) {
+    if (typeof reference !== 'string' || !REFERENCE.test(reference)) return null;
+    const rows = await ownHistory(conversation, token, entitlements);
+    const found = rows && withReference(rows, reference);
+    if (!found) return null;
+    const words = String(found.partnerlib ?? '').split(/\s+/).filter((w) => [...w].length >= 3);
+    const named = words.map((w) => new RegExp(`(?<![\\p{L}\\p{N}])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'giu'));
+    return {
+      transaction: { ...maskTransaction(found, conversation.session.wallet), reference },
+      scrub: (text) => named.reduce((out, re) => out.replace(re, (w) => `${[...w][0].toUpperCase()}.`), text),
+    };
+  }
+
+  // The customer's latest transactions, masked, for the agent who takes their case. Same wallet-scoped list and
+  // history gating as every other read; null when history is not readable for this customer.
+  async function recentMasked(conversation, token, entitlements, count = 5) {
+    const rows = await ownHistory(conversation, token, entitlements);
+    return rows ? rows.slice(0, count).map((r) => maskTransaction(r, conversation.session.wallet)) : null;
+  }
+
+  return { run, start, ownHistory, recentMasked, caseTransaction, unlockWithPortalFlag, portalFlagProblem, unlockWithPin };
 }

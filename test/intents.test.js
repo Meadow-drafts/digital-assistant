@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { intentTool } from '../src/intents.js';
+import { intentTool, asksForUnavailable } from '../src/intents.js';
 import { alice, begin, say, start, toolModel } from './harness/t1-helpers.js';
 import { createFakeModel } from './harness/fake-model.js';
 
@@ -95,4 +95,25 @@ test('the audit says whether the tool came from the model or the rules, and the 
   const plain = await start({ customers: [a], model: createFakeModel(() => '[]') });
   t.after(plain.close);
   assert.match(await (await fetch(`${plain.baseUrl}/`)).text(), /token="demo-token"/);
+});
+
+test('a request to be taken to a page is a navigation ask, not a data read', () => {
+  for (const q of ['Take me to my transaction history', 'open my transactions page', "Emmène-moi à mes dernières transactions", 'go to my history']) {
+    assert.equal(intentTool(q), null, q);
+  }
+  assert.equal(intentTool('show my last transactions').name, 'last_transactions');
+});
+
+test('questions about features the portal does not offer are recognised in English and French', () => {
+  for (const q of ['Add a beneficiary', 'How do I save a beneficiary for next time?', 'Comment ajouter un bénéficiaire ?', 'How do I make an international transfer?', 'Comment faire un virement international ?',
+    'Block my lost card', 'Bloquer ma carte perdue', 'my card was stolen', 'je veux changer le plafond de ma carte', 'I forgot my password', "j'ai oublié mon mot de passe", 'do you have airtime bundles', 'je veux un forfait internet']) {
+    assert.equal(asksForUnavailable(q), true, q);
+  }
+});
+
+test('supported tasks that sound close are not mistaken for unavailable ones', () => {
+  for (const q of ['How do I see my cards?', 'Comment voir mes cartes ?', 'withdraw cash without my card', 'send money abroad with remittance', 'change my pin', 'how do I pay my electricity bill', 'virement vers un wallet', 'what is my balance']) {
+    assert.equal(asksForUnavailable(q), false, q);
+  }
+  assert.equal(asksForUnavailable(undefined), false);
 });

@@ -7,6 +7,8 @@ export const AGENTS = {
     { id: 'paul', name: 'Paul Etoga', email: 'paul@bank.test', password: 'paul-pass' },
   ],
   onCall: ['aline'],
+  // Staff allowed to read the audit log; Paul is an ordinary agent.
+  auditReaders: ['aline'],
 };
 export const CONSOLE_URL = 'https://support.bank.test/console';
 
@@ -45,5 +47,8 @@ export async function agentLogin(baseUrl, id = 'aline') {
     claim: (ref) => call(baseUrl, 'POST', `/agent/cases/${ref}/claim`, { token }),
     reply: (ref, text) => call(baseUrl, 'POST', `/agent/cases/${ref}/messages`, { token, body: { text } }),
     resolve: (ref) => call(baseUrl, 'POST', `/agent/cases/${ref}/resolve`, { token }),
+    transfer: (ref, to) => call(baseUrl, 'POST', `/agent/cases/${ref}/transfer`, { token, body: { to } }),
+    suggest: (ref, count) => call(baseUrl, 'POST', `/agent/cases/${ref}/suggestions`, { token, body: count === undefined ? {} : { count } }),
+    note: (ref, text) => call(baseUrl, 'POST', `/agent/cases/${ref}/notes`, { token, body: { text } }),
   };
 }

@@ -108,3 +108,17 @@ test('the failed-question log and the router model also get only redacted text',
   assert.ok(!everythingTheModelSaw(model).includes('7391'));
   assert.ok(svc.failedQuestions.records.length === 1);
 });
+
+test('a session token pasted into the chat (a JWT, "Bearer ...", or after the word token) never reaches the model or the audit', async (t) => {
+  const svc = await startService({ model: createFakeModel([['Noted.']]) });
+  t.after(svc.close);
+  const jwt = 'eyJhbGciOiJub25lIn0.eyJzdWIiOiIyMzc2OTAwMDAxMTEifQ.signature123';
+
+  for (const message of [`it says ${jwt} on my screen`, 'my header is Bearer opaqueValue987 help', 'mon jeton est abc123def456 aidez-moi', 'token: opaqueValue987']) {
+    const { events } = await chatTurn(svc.baseUrl, { message, tenant: 'demo' });
+    assert.ok(warningOf(events), `no warning for: ${message.slice(0, 30)}`);
+  }
+
+  const seen = everythingTheModelSaw(svc.model) + JSON.stringify(svc.audit.records);
+  for (const secret of [jwt, 'opaqueValue987', 'abc123def456']) assert.ok(!seen.includes(secret), `${secret} reached the model or the audit`);
+});

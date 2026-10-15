@@ -240,3 +240,19 @@ test('when the balance read fails, the audit says why with codes and field names
   assert.match(rec.toolReason, /^balance code=01 keys=.*solde\.availableBalance amount=string$/);
   assert.doesNotMatch(JSON.stringify(rec), /912345|not-a-number/);
 });
+
+test('a rejected portal flag is audited with the reason as a shape only: not verified, or the phone does not match', async (t) => {
+  const a = alice();
+  const svc = await start({ customers: [a], model: toolModel('[[tool:balance {}]]') });
+  t.after(svc.close);
+  const id = await begin(svc, a);
+
+  const open = (portalFlag) => fetch(`${svc.baseUrl}/unlock`, { method: 'POST', headers: { authorization: `Bearer ${a.token}`, 'content-type': 'application/json' }, body: JSON.stringify({ conversationId: id, portalFlag }) });
+  assert.equal((await open({ verified: '0', tel: a.sub })).status, 403);
+  assert.equal((await open({ verified: '1', tel: a.sub.slice(3) })).status, 403);
+
+  const reasons = svc.audit.records.filter((r) => r.outcome === 'unlock_flag_not_valid').map((r) => r.toolReason);
+  assert.match(reasons[0], /^not_verified \(flag "0"\)$/);
+  assert.match(reasons[1], /^tel_mismatch \(flag \d+ digits, wallet \d+ digits, same last 3: true\)$/);
+  assert.ok(!JSON.stringify(reasons).includes(a.sub));
+});

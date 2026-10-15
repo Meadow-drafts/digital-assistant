@@ -3,7 +3,7 @@ id: bill-payment
 audience: individual
 route: /payments/bill-payment
 package: LOPV, LOPE, LOPA, LOPS, L0PC, CEPV (any one; billers may be locked individually)
-verified-on: DRAFT 2026-10-12, code read only, owner to validate
+verified-on: 2026-10-14, bank approval confirmed by user
 ---
 # Pay a bill
 

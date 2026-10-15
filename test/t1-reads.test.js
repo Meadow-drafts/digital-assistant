@@ -37,15 +37,18 @@ test('last transactions: ids come from clientInfo with the user\'s own token; th
     amount: 15000,
     currency: 'XAF',
     direction: 'out',
-    type: 'TRINC',
+    nature: { code: 'TRINC', en: 'TRINC', fr: 'TRINC' },
+    type: null,
     status: 'success',
     account: '****8901',
     counterparty: 'J. P. M.',
   });
 
-  // one masking point: model input, UI events and audit all carry the same masked form
+  // one masking point: model input, the tool result and audit all carry the same masked form. The customer's own
+  // screen also gets full values, but only in the separate `display` rows (checked in the display tests below).
   const seenByModel = JSON.stringify(model.calls.filter((c) => c.purpose !== 'route'));
-  for (const surface of [seenByModel, wire(events), JSON.stringify(svc.audit.records)]) {
+  const withoutDisplay = wire(events.map(({ display, ...rest }) => rest));
+  for (const surface of [seenByModel, withoutDisplay, JSON.stringify(svc.audit.records)]) {
     assert.match(surface, /REF-0001/);
     assert.match(surface, /15000/);
     assert.match(surface, /\*\*\*\*8901/);
@@ -143,7 +146,8 @@ test('transfer status by reference: only the customer\'s own transfer is shown, 
   const model = createFakeModel((request) => {
     if (request.purpose !== 'route') return ['ok'];
     const last = request.messages.at(-1).content;
-    return /REF-BOB/.test(last) ? '[[tool:transfer_status {"reference":"REF-BOB"}]]' : '[[tool:transfer_status {"reference":"REF-ALICE"}]]';
+    const reference = /REF-(?:BOB|NOBODY)/.exec(last)?.[0] ?? 'REF-ALICE';
+    return `[[tool:transfer_status {"reference":"${reference}"}]]`;
   });
   const svc = await start({ customers: [a, b], model });
   t.after(svc.close);
@@ -151,13 +155,76 @@ test('transfer status by reference: only the customer\'s own transfer is shown, 
   const id = await begin(svc, a);
   const mine = await say(svc, a, 'status of REF-ALICE', id);
   assert.equal(mine.events.find((e) => e.type === 'tool').result.transaction.status, 'pending');
-  const statusCall = svc.gateway.calls.find((c) => c.path.endsWith('history/transactions'));
-  assert.deepEqual(statusCall.query, { cli: a.cli, clientRefId: 'REF-ALICE' }, 'as the portal asks');
+  assert.equal(svc.gateway.calls.some((c) => c.path === '/digitalbank/history/transactions'), false, 'the slow by-reference endpoint is never called');
+  assert.ok(svc.gateway.calls.some((c) => c.path === '/digitalbank/history/bipay-recent'), 'answered from the customer\'s own history list');
 
   const theirs = await say(svc, a, 'status of REF-BOB', id);
   const result = theirs.events.find((e) => e.type === 'tool').result;
   assert.equal(result.found, false);
   assert.doesNotMatch(wire(theirs.events), /777777|55566677788/);
+
+  // an unknown reference gets the identical reply
+  const unknown = await say(svc, a, 'status of REF-NOBODY', id);
+  const same = (e) => JSON.stringify(e.filter((x) => x.type === 'tool').map((x) => x.result)).replaceAll(/REF-[A-Z]+/g, 'REF');
+  assert.equal(same(unknown.events), same(theirs.events));
+});
+
+test('transfer_status and explain_failure find a transfer through the same history lookup, by any reference the portal shows', async (t) => {
+  const a = alice();
+  a.rows = [row(a, { clientReferenceId: 'REF-0001', ntrans: 'TRIB178273486318', nhis: '0004711', sta: '1000' })];
+  const model = createFakeModel((request) => {
+    if (request.purpose !== 'route') return ['ok'];
+    const last = request.messages.at(-1).content;
+    const tool = /why did/.test(last) ? 'explain_failure' : 'transfer_status';
+    return `[[tool:${tool} {"reference":"${/(REF-0001|TRIB178273486318|0004711)/.exec(last)[1]}"}]]`;
+  });
+  const svc = await start({ customers: [a], model });
+  t.after(svc.close);
+  const id = await begin(svc, a);
+
+  for (const reference of ['REF-0001', 'TRIB178273486318', '0004711']) {
+    svc.gateway.calls.length = 0;
+    const status = await say(svc, a, `status of ${reference}`, id);
+    const statusCalls = svc.gateway.calls.map((c) => `${c.method} ${c.path}`);
+    svc.gateway.calls.length = 0;
+    const why = await say(svc, a, `why did ${reference}`, id);
+    const whyCalls = svc.gateway.calls.map((c) => `${c.method} ${c.path}`);
+
+    assert.equal(status.events.find((e) => e.type === 'tool').result.transaction.status, 'pending', reference);
+    assert.equal(why.events.find((e) => e.type === 'tool').result.transaction.status, 'pending', reference);
+    assert.deepEqual(statusCalls, whyCalls, `same gateway lookup for ${reference}`);
+  }
+});
+
+test('transfer_status echoes the reference the customer asked about, so a different clientReferenceId does not read as not found', async (t) => {
+  const a = alice();
+  a.rows = [row(a, { clientReferenceId: '1f17ad9a-a255-6020-9e84-2621d4fd2183', ntrans: 'TRINW178352107047', nhis: '0004711', sta: '1000' })];
+  const model = createFakeModel((request) => (request.purpose !== 'route' ? ['ok'] : '[[tool:transfer_status {"reference":"TRINW178352107047"}]]'));
+  const svc = await start({ customers: [a], model });
+  t.after(svc.close);
+
+  const { events } = await say(svc, a, 'status of TRINW178352107047', await begin(svc, a));
+  const result = events.find((e) => e.type === 'tool').result;
+  assert.equal(result.found, true);
+  assert.equal(result.transaction.reference, 'TRINW178352107047');
+});
+
+test('when the bank cannot be reached in time, the status reply says so and offers to try again or talk to a human, never a hang', async (t) => {
+  const a = alice();
+  a.rows = [row(a, { clientReferenceId: 'REF-ALICE' })];
+  const model = toolModel('[[tool:transfer_status {"reference":"REF-ALICE"}]]');
+  const svc = await start({ customers: [a], model });
+  t.after(svc.close);
+  const id = await begin(svc, a);
+  svc.gateway.calls.length = 0;
+  svc.gateway.throwNext(Object.assign(new Error('timed out'), { name: 'TimeoutError' }));
+
+  const { events } = await say(svc, a, 'status of REF-ALICE', id);
+
+  assert.equal(events.find((e) => e.type === 'tool_blocked').code, 'unavailable');
+  assert.match(events.filter((e) => e.type === 'delta').map((e) => e.text).join(''), /try again.*talk to a human agent/);
+  assert.equal(svc.gateway.calls.length, 1, 'a timeout is not retried');
+  assert.ok(events.some((e) => e.type === 'done'));
 });
 
 test('fees and limits are read with a read-only lookup and labelled as the bank\'s limits, never the customer\'s own', async (t) => {
@@ -191,6 +258,20 @@ test('a package without history: the tool is never called and the customer is to
   const blocked = events.find((e) => e.type === 'tool_blocked');
   assert.equal(blocked.code, 'not_in_package');
   assert.match(events.filter((e) => e.type === 'delta').map((e) => e.text).join(''), /not included in your package/);
+});
+
+test('a package without history: the status of a transfer is not looked up either', async (t) => {
+  const a = alice();
+  a.rows = [row(a, { clientReferenceId: 'REF-ALICE' })];
+  const svc = await start({ customers: [a], model: toolModel('[[tool:transfer_status {"reference":"REF-ALICE"}]]') });
+  t.after(svc.close);
+  const id = await begin(svc, a, { gating: { usePackages: true, natureCodes: ['TRINC'], primaryConnect: true } });
+  svc.gateway.calls.length = 0;
+
+  const { events } = await say(svc, a, 'status of REF-ALICE', id);
+
+  assert.equal(svc.gateway.calls.length, 0);
+  assert.equal(events.find((e) => e.type === 'tool_blocked').code, 'not_in_package');
 });
 
 test('a secondary connect sees only its own wallet and is told history is for the primary connect, whatever the widget claims', async (t) => {
@@ -264,7 +345,46 @@ test('a counterparty known only by phone number is shown as a masked phone, and 
   assert.equal(byRef['REF-IN'].direction, 'in');
   assert.equal(byRef['REF-IN'].counterparty, '******222');
   assert.equal(byRef['REF-IN'].account, '****8901');
-  assert.doesNotMatch(wire(events), /237677000999|237600111222|99999999999/);
+  // The model input and the audit stay masked; only the customer's own screen (the display rows) carries full values.
+  assert.doesNotMatch(JSON.stringify(svc.model.calls.map((c) => c.messages)), /237677000999|237600111222|99999999999/);
+  assert.doesNotMatch(JSON.stringify(svc.audit.records), /237677000999|237600111222|99999999999/);
+  const tool = events.find((e) => e.type === 'tool');
+  assert.doesNotMatch(JSON.stringify(tool.result), /237677000999|237600111222|99999999999/);
+  const shown = tool.display.transactions;
+  assert.deepEqual(shown.map((x) => [x.from, x.to]), [[a.sub, '237677000999'], ['237600111222', a.sub]]);
+});
+
+test('the display rows follow the portal History table: padded numbers trimmed, nature label from nomenclature 6000 in EN and FR, type from the service, member with its id', async (t) => {
+  const a = alice();
+  a.rows = [row(a, {
+    ntrans: 'MTR1', clientReferenceId: '', dop: null, dmo: '2026-09-25T15:43:13', dou1: '2026-09-25T15:43:20', nat: 'TRIB', service: 'GIMAC-EMI',
+    codewaldo: ` ${a.sub} `, codewalop: '237671996088', partnerlib: 'ADVANS', partnerid: '11020',
+  })];
+  const svc = await start({ customers: [a], model: toolModel('[[tool:last_transactions {}]]'), fixtures: { nomenclature: [{ lib1: 'TRIB', lib2: 'Bank transfer', lib6: 'Virement bancaire' }] } });
+  t.after(svc.close);
+
+  const { events } = await say(svc, a, 'my last transactions', await begin(svc, a));
+
+  const tool = events.find((e) => e.type === 'tool');
+  assert.deepEqual(tool.display.transactions[0], {
+    date: '2026-09-25 15:43:20', id: 'MTR1', from: a.sub, to: '237671996088', member: 'ADVANS [11020]',
+    nature: { code: 'TRIB', en: 'Bank transfer', fr: 'Virement bancaire' }, type: 'emission',
+    amount: 15000, currency: 'XAF', status: 'success', direction: 'out',
+  });
+  assert.equal(tool.result.transactions[0].type, 'emission');
+  assert.equal(tool.result.transactions[0].nature.fr, 'Virement bancaire');
+});
+
+test('if the nomenclature cannot be read, nature shows its code and nothing fails', async (t) => {
+  const a = alice();
+  a.rows = [row(a, { nat: 'TRIB' })];
+  const svc = await start({ customers: [a], model: toolModel('[[tool:last_transactions {}]]') });
+  t.after(svc.close);
+
+  const { events } = await say(svc, a, 'my last transactions', await begin(svc, a));
+
+  assert.equal(events.find((e) => e.type === 'tool').display.transactions[0].nature.en, 'TRIB');
+  assert.ok(!events.some((e) => e.type === 'tool_blocked'));
 });
 
 test('session start: the cli the widget claims is verified with the backend under the user\'s token, and the ids are fixed from the verified answer', async (t) => {
@@ -490,4 +610,34 @@ test('the session verifier drops every balance field and the client\'s name, ema
   ];
   for (const [surface, text] of surfaces) assert.doesNotMatch(text, forbidden, `${surface} leaked a clientInfo field`);
   assert.match(wire(events), /REF-0001/, 'the read itself still worked');
+});
+
+test('rows shaped like the real server (dop null, dates in dmo/dou1, empty clientReferenceId) still show a date and a reference, newest first', async (t) => {
+  const a = alice();
+  a.rows = [
+    row(a, { ntrans: 'MPU1', clientReferenceId: '', dop: null, dmo: '2026-09-28T16:34:30', dou1: '2026-09-28T16:34:03' }),
+    row(a, { ntrans: 'MTR2', clientReferenceId: 'REF-2', dop: null, dmo: null, dou1: '2026-10-05T21:20:39' }),
+    row(a, { ntrans: 'MTR3', clientReferenceId: '', dop: null, dmo: '2026-09-25T16:07:43' }),
+  ];
+  const svc = await start({ customers: [a], model: toolModel('[[tool:last_transactions {"count":5}]]') });
+  t.after(svc.close);
+
+  const { events } = await say(svc, a, 'Show my last transactions', await begin(svc, a));
+
+  const txs = events.find((e) => e.type === 'tool').result.transactions;
+  assert.deepEqual(txs.map((x) => [x.reference, x.date]), [['REF-2', '2026-10-05'], ['MPU1', '2026-09-28'], ['MTR3', '2026-09-25']]);
+});
+
+test('a reply listing real-shaped references and dates is not blocked as a phone number', async (t) => {
+  const a = alice();
+  a.rows = [row(a, { ntrans: 'MPU179123163935', clientReferenceId: '', dop: null, dmo: '2026-09-28T16:34:30', mtrans: 12000 })];
+  const reply = 'MPU179123163935 on 2026-09-28 12000 XAF, 2026-09-28 12000';
+  const model = createFakeModel((req) => (req.purpose === 'route' ? '[[tool:last_transactions {"count":5}]]' : reply));
+  const svc = await start({ customers: [a], model });
+  t.after(svc.close);
+
+  const { events } = await say(svc, a, 'Show my last transactions', await begin(svc, a));
+
+  assert.ok(!events.some((e) => e.type === 'blocked'));
+  assert.ok(events.filter((e) => e.type === 'delta').map((e) => e.text).join('').includes('MPU179123163935'));
 });

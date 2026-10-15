@@ -96,7 +96,9 @@ export function loadGuides(dirArg) {
       const text = inject(body, glossary[lang], `${id}.${lang}.md`);
       entry[lang] = { title: /^# (.+)$/m.exec(text)?.[1] ?? id, text, closing: closingOf(text) };
       if (lang === 'en') {
+        entry.customerCatalogue = Boolean(meta['verified-on']) && !/^DRAFT\b/i.test(meta['verified-on']);
         entry.packages = packagesOf(meta.package ?? '');
+        entry.route = /^\/[A-Za-z0-9\-/]*/.exec(meta.route ?? '')?.[0] ?? null; // the first plain path, if the guide names one
         entry.primaryOnly = /\(primary connect only\)/.test(meta.audience ?? '');
         entry.roles = new Set((meta.audience ?? '').match(/individual|merchant/g) ?? []);
       }
@@ -105,4 +107,17 @@ export function loadGuides(dirArg) {
   }
   const unsupportedFile = path.join(dir, 'UNSUPPORTED.md');
   return new GuideSet(guides, existsSync(unsupportedFile) ? readFileSync(unsupportedFile, 'utf8') : '');
+}
+
+// Return one exact numbered step shared by every candidate guide. If there is
+// no identical step, the service can safely fall back without model synthesis.
+export function commonVerifiedStep(candidates, language) {
+  if (candidates.length < 2) return null;
+  const steps = candidates.map((guide) => {
+    const heading = language === 'fr' ? 'Étapes' : 'Steps';
+    const section = new RegExp(`^## ${heading}\\s*\\n([\\s\\S]*?)(?=\\n## |$)`, 'm').exec(guide[language].text)?.[1] ?? '';
+    return [...section.matchAll(/^\d+\.\s+(.+)$/gm)].map((match) => match[1].trim());
+  });
+  const shared = steps[0].find((step) => steps.slice(1).every((list) => list.includes(step)));
+  return shared ?? null;
 }

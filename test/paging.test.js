@@ -160,10 +160,10 @@ test('after hours: once the shift starts the normal 5 minute broadcast applies a
 test('after hours follows the configured hours: a weekday evening is open when the configured close is later', async (t) => {
   const { loadSupport } = await import('../src/support.js');
   const base = loadSupport(new URL('../config/support.json', import.meta.url));
-  const { opened, svc } = await afterHoursCase(t, FRIDAY_EVENING, { support: { ...base, hours: { ...base.hours, close: '20:00' } } });
+  const { opened, svc, cust } = await afterHoursCase(t, FRIDAY_EVENING, { support: { ...base, hours: { ...base.hours, close: '20:00' } } });
 
   assert.equal(opened.body.queued, undefined);
-  assert.deepEqual(mails(svc), ['aline@bank.test'], 'open by config: paged straight away');
+  assert.deepEqual(mails(svc), [`${cust.sub}@mail.test`, 'aline@bank.test'], 'open by config: confirmation to the customer (ticket 38), then paged straight away');
 });
 
 test('after hours without a known customer email still queues and pages at the shift start', async (t) => {

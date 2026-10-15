@@ -3,74 +3,229 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Support console</title>
+  <title>BPay Support · Agent console</title>
   <style>
-    body { font: 14px/1.45 system-ui, sans-serif; margin: 0; background: #f5f4f0; color: #1d1d1b; }
-    main { max-width: 1000px; margin: 0 auto; padding: 1rem; }
-    h1 { font-size: 1.1rem; margin: 0 0 .75rem; }
-    h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: #6b6b66; margin: 0 0 .5rem; }
-    .card { background: #fff; border: 1px solid #dcdad2; border-radius: 8px; padding: .75rem 1rem; }
-    .grid { display: grid; grid-template-columns: 280px 1fr; gap: 1rem; align-items: start; }
-    @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
-    [hidden] { display: none !important; }
-    label { display: block; margin: .4rem 0; }
-    input[type=text], input[type=password] { font: inherit; padding: .35rem .5rem; width: 100%; box-sizing: border-box; }
-    button { font: inherit; border: 1px solid #c9c6bb; background: #fff; border-radius: 6px; padding: .3rem .7rem; cursor: pointer; }
-    button:disabled { opacity: .45; cursor: default; }
-    button.primary { background: #0f6b5c; border-color: #0f6b5c; color: #fff; }
-    [data-role="queue"] { display: grid; gap: .4rem; }
-    [data-role="case-row"] { text-align: left; border-radius: 6px; }
-    [data-role="case-row"][aria-current="true"] { border-color: #0f6b5c; background: #ecfdf5; }
-    [data-role="transcript"] { display: grid; gap: .3rem; max-height: 22rem; overflow-y: auto; margin: .5rem 0; }
-    [data-role="line"] { padding: .3rem .6rem; border-radius: 6px; background: #ecebe4; max-width: 85%; white-space: pre-wrap; }
-    [data-role="line"][data-from="customer"] { justify-self: start; background: #fff; border: 1px solid #dcdad2; }
-    [data-role="line"][data-from="agent"] { justify-self: end; background: #dbeafe; }
-    [data-role="line"][data-from="bot"] { background: #eef0f3; }
-    [data-role="line"][data-from="system"] { justify-self: center; background: none; color: #6b6b66; font-style: italic; }
-    .who { display: block; font-size: 11px; color: #6b6b66; }
-    .row { display: flex; gap: .5rem; margin: .25rem 0; }
-    .row input { flex: 1; }
-    .error { color: #b3261e; margin: .25rem 0; min-height: 1em; }
-    .note { color: #6b6b66; font-size: 12px; }
+    :root { color-scheme:light; --ink:#202630; --muted:#737b87; --line:#e7e9ed; --surface:#fff; --canvas:#f5f6f8; --brand:#df7717; --brand-soft:#fff4e8; --green:#167557; --green-soft:#eaf6f1; --urgent:#b83d3d; --urgent-soft:#fff0ef; --blue:#355f97; --blue-soft:#eef4fc; font:14px/1.45 Inter,system-ui,-apple-system,"Segoe UI",sans-serif; color:var(--ink); }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--canvas); color:var(--ink); font:inherit; }
+    [hidden] { display:none !important; }
+    button,input,select,textarea { font:inherit; }
+    button { color:inherit; border:1px solid var(--line); border-radius:8px; background:#fff; padding:8px 12px; font-size:12px; cursor:pointer; }
+    button:hover:not(:disabled) { border-color:#87929f; }
+    button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible { outline:3px solid #a85b0b; outline-offset:2px; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    button.primary { background:var(--brand); border-color:var(--brand); color:#fff; font-weight:650; }
+    input,select,textarea { min-width:0; border:1px solid var(--line); border-radius:8px; padding:0 11px; background:#fff; font-size:12px; }
+    input[list] { padding-right:2rem; background-image:linear-gradient(45deg,transparent 50%,#7d8793 50%),linear-gradient(135deg,#7d8793 50%,transparent 50%); background-position:calc(100% - 14px) 52%,calc(100% - 9px) 52%; background-size:5px 5px,5px 5px; background-repeat:no-repeat; }
+    main { width:100%; max-width:1580px; margin:0 auto; padding:30px clamp(20px,4vw,60px); }
+    .topbar { height:64px; min-height:64px; display:flex; align-items:center; gap:28px; padding:0 28px; background:#fff; border-bottom:1px solid var(--line); }
+    .brand { display:flex; align-items:center; font-weight:760; white-space:nowrap; }
+    .brand-mark { display:inline-grid; place-items:center; width:34px; height:34px; margin-right:10px; border-radius:11px; background:var(--brand-soft); color:#af5d0d; font-weight:850; }
+    .nav { display:flex; align-items:center; align-self:stretch; gap:5px; }
+    .nav button { height:100%; padding:0 13px; border:0; border-bottom:2px solid transparent; border-radius:0; background:transparent; color:#69717d; font-size:12px; }
+    .nav button[aria-current="page"] { color:#a95308; border-bottom-color:var(--brand); background:transparent; font-weight:650; }
+    .spacer { flex:1; }
+    .identity { display:flex; align-items:center; gap:9px; color:#4f5661; font-size:12px; }
+    .identity-name { color:var(--ink); font-weight:600; }
+    h1 { margin:0; font-size:23px; line-height:1.2; letter-spacing:-.4px; }
+    h2 { margin:0; font-size:13px; }
+    h3 { margin:0 0 11px; color:#626a75; font-size:10px; letter-spacing:.06em; text-transform:uppercase; }
+    p { margin:.35rem 0; }
+    .page-head { display:flex; align-items:center; gap:12px; margin:0 0 23px; }
+    .page-head p,.muted,.note { color:var(--muted); }
+    .page-head p { margin:4px 0 0; font-size:12px; }
+    .card { border:1px solid var(--line); border-radius:12px; background:var(--surface); padding:17px; }
+    .login-wrap { min-height:calc(100vh - 64px); display:grid; place-items:center; padding:30px; }
+    .login-card { width:min(410px,100%); padding:31px; border-radius:16px; }
+    .login-card h1 { margin:.8rem 0 .2rem; font-size:16px; }
+    .login-card > p { color:var(--muted); margin:0 0 22px; font-size:12px; }
+    .login-card label { display:block; margin:13px 0 6px; font-size:11px; font-weight:650; }
+    .login-card input { display:block; width:100%; height:42px; margin-top:6px; }
+    .login-card [type=submit] { width:100%; height:40px; margin-top:10px; }
+    .secure-note { margin-top:19px; padding-top:13px; border-top:1px solid var(--line); font-size:10px; color:var(--muted); }
+    .error { min-height:1.2em; color:#a32620; }
+    .toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:7px; margin:0; }
+    .toolbar input[type=search] { flex:1 1 210px; height:38px; }
+    .toolbar select { flex:0 1 185px; height:38px; }
+    .queue-count { display:inline-grid; place-items:center; min-width:22px; height:22px; margin-left:5px; padding:0 6px; border-radius:50%; background:#f0f1f4; color:var(--muted); font-size:10px; }
+    .queue-panel { padding:0; overflow:hidden; }
+    .queue-panel-head { padding:16px 17px 12px; border-bottom:1px solid var(--line); }
+    .queue-panel-head h2 { font-size:13px; margin:0 0 4px; }
+    .queue-panel-head > p { margin:0; color:var(--muted); font-size:11px; }
+    .queue-panel-head .toolbar { margin-top:12px; }
+    .queue-panel-head .toolbar label { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:10px; }
+    .queue-panel-head .toolbar select { height:31px; border-radius:7px; padding:0 8px; font-size:10px; color:#59616c; }
+    [data-role=queue] { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; padding:6px; }
+    [data-role=case-row] { display:block; min-width:0; width:100%; margin:2px 0; padding:12px; text-align:left; border:1px solid var(--line); border-left:3px solid transparent; border-radius:8px; background:#fff; }
+    [data-role=case-row]:hover { background:#f8f9fa; }
+    [data-role=case-row][aria-current=true] { border-color:#f0c79f; border-left:3px solid var(--brand); background:#fff8f1; }
+    [data-role=case-row][data-level=warning] { border-left-color:#df9a4b; }
+    [data-role=case-row][data-level=urgent] { border-left-color:var(--urgent); }
+    [data-role=case-row][data-level=urgent][aria-current=true] { background:#fff6f4; }
+    .case-head { display:flex; align-items:center; gap:7px; }
+    .case-ref { font-size:12px; font-weight:700; font-variant-numeric:tabular-nums; }
+    .case-age { margin-left:auto; color:#818995; font-size:10px; white-space:nowrap; }
+    .case-summary { display:block; min-width:0; min-height:1.45em; margin:6px 0 8px; color:#555e69; font-size:11px; line-height:1.45; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .case-foot { display:flex; align-items:center; gap:5px; }
+    .case-wait { margin-left:auto; color:var(--muted); text-align:right; font-size:10px; font-variant-numeric:tabular-nums; }
+    .pill { display:inline-flex; align-items:center; width:max-content; border-radius:99px; padding:4px 8px; background:#f0f1f4; color:#626a75; font-size:10px; font-weight:500; }
+    .pill.priority { background:var(--urgent-soft); color:#a53131; }
+    .pill.waiting { background:#fff2df; color:#945f12; }
+    .pill.assigned { background:var(--blue-soft); color:#395f91; }
+    .grid { display:grid; grid-template-columns:minmax(0,1fr) 290px; gap:18px; align-items:start; }
+    .case-heading { display:flex; align-items:center; gap:10px; padding:17px 20px; border-bottom:1px solid var(--line); }
+    [data-role=detail] { padding:0; overflow:hidden; }
+    .case-heading h1 { font-size:15px; }
+    .case-meta { margin:4px 0 0; color:var(--muted); font-size:11px; }
+    .actions { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-left:auto; }
+    .actions select { max-width:190px; height:34px; }
+    .back-button { margin:0 0 12px; color:#a85b0b; border:0; background:transparent; padding:0; font-size:11px; }
+    .block { border:1px solid var(--line); border-radius:9px; padding:12px 14px; margin:14px 20px 5px; background:#f7f8fa; color:#505965; font-size:11px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; }
+    [data-role=summary] h3 { display:block; margin:0 0 3px; color:#787f89; font-size:9px; }
+    [data-role=draft] { background:#fff8f1; }
+    .workspace { display:grid; grid-template-columns:minmax(0,1fr) 310px; gap:18px; align-items:start; margin-top:0; }
+    .workspace .block { margin:0; }
+    .workspace aside { display:flex; flex-direction:column; gap:13px; }
+    .workspace aside .block { padding:15px 16px; background:#fff; }
+    [data-role=chat] { min-width:0; }
+    [data-role=transcript-box] > summary { padding:12px 17px 0; color:#59616c; font-size:11px; font-weight:650; cursor:pointer; }
+    [data-role=transcript] { display:flex; flex-direction:column; gap:11px; height:clamp(230px,34vh,390px); overflow:auto; padding:17px 23px; }
+    [data-role=line] { align-self:flex-start; max-width:78%; padding:10px 12px; border-radius:12px; background:#f3f4f6; font-size:12px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; }
+    [data-role=line][data-from=customer] { background:#fff; border:1px solid var(--line); }
+    [data-role=line][data-from=agent] { align-self:flex-end; background:var(--blue-soft); }
+    [data-role=line][data-from=system] { align-self:center; color:#8a9099; background:transparent; font-size:10px; padding:1px; font-style:normal; }
+    .who { display:block; color:var(--muted); font-size:10px; font-weight:650; margin-bottom:3px; }
+    .row { display:flex; align-items:center; gap:8px; margin:9px 0; }
+    .row input,.row textarea { flex:1; }
+    textarea { width:100%; min-height:40px; max-height:90px; resize:vertical; padding:9px; font-size:11px; }
+    [data-role=suggestions] { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; margin:8px 17px; }
+    [data-role=suggestion] { min-height:70px; text-align:left; border:1px solid #dfe8f3; border-radius:8px; padding:8px; background:#f8fbff; color:#4d5b6d; font-size:10px; line-height:1.4; }
+    [data-role=note] { padding:8px 0; border-top:1px solid #f0f1f3; font-size:10px; line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; }
+    [data-role=record] { padding:9px; margin-top:7px; border:1px solid var(--line); border-radius:8px; background:#fff; font-size:10px; font-variant-numeric:tabular-nums; }
+    .section-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; }
+    .filters { display:flex; flex-wrap:wrap; gap:7px; margin:12px 0; }
+    .filters input,.filters select { min-width:150px; }
+    .metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:0 0 16px; }
+    .metric { min-height:100px; padding:17px; }
+    .metric strong { display:block; font-size:23px; line-height:1.2; margin:7px 0 2px; font-variant-numeric:tabular-nums; }
+    .metric label { color:var(--muted); font-size:10px; }
+    .metric .small { font-size:10px; }
+    .dashboard-grid { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr); grid-template-areas:"topics language" "unresolved privacy"; grid-template-rows:auto auto; gap:14px; align-items:stretch; }
+    .dashboard-grid > .card { min-width:0; min-height:0; height:100%; padding:17px; }
+    .dashboard-grid h2 { font-size:13px; margin:0; }
+    .dashboard-grid > .card > p { margin:4px 0 13px; color:var(--muted); font-size:10px; }
+    .dashboard-topics { grid-area:topics; }
+    .dashboard-language { grid-area:language; }
+    .dashboard-unresolved { grid-area:unresolved; }
+    .dashboard-privacy { grid-area:privacy; }
+    .dashboard-span { grid-column:1 / -1; }
+    .topic-row { display:grid; grid-template-columns:130px minmax(0,1fr) 33px; align-items:center; gap:10px; padding:7px 0; font-size:10px; }
+    .topic-name { overflow-wrap:anywhere; }
+    .topic-bar { height:8px; border-radius:20px; overflow:hidden; background:#f1f2f4; }
+    .topic-bar span { display:block; height:100%; border-radius:20px; background:#e9a562; }
+    .topic-count { text-align:right; font-weight:700; font-variant-numeric:tabular-nums; }
+    .language-grid { display:flex; gap:15px; margin-top:20px; }
+    .language-card { flex:1; min-width:0; border:1px solid var(--line); border-radius:9px; padding:13px; }
+    .language-card strong { display:block; margin-top:8px; font-size:18px; }
+    .language-card strong:first-child { margin:0; font-size:11px; }
+    .language-card .small { color:var(--muted); font-size:10px; }
+    .soft-note { border-radius:8px; background:#f7f8fa; padding:11px 13px; color:#646c77; font-size:10px; }
+    .data-list > div { padding:8px 0; border-top:1px solid var(--line); font-size:10px; }
+    .unresolved-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; }
+    .audit-filters { display:flex; align-items:end; flex-wrap:wrap; gap:9px; padding:15px; margin:10px 0 14px; border:1px solid var(--line); border-radius:12px; background:#fff; }
+    .audit-filters label { display:grid; flex:1 1 160px; min-width:145px; gap:5px; color:var(--muted); font-size:10px; }
+    .audit-filters input { width:100%; height:34px; padding:0 9px; border-radius:7px; font-size:11px; }
+    .audit-filters button { height:34px; white-space:nowrap; }
+    .audit-exports { display:flex; flex-wrap:wrap; gap:7px; margin-left:auto; }
+    .outcome-pill { display:inline-block; border-radius:99px; padding:.28rem .65rem; background:#f0f1f3; color:#596371; white-space:nowrap; }
+    .outcome-pill[data-outcome*=claim],.outcome-pill[data-outcome*=note] { background:#eaf6f1; color:#347d68; }
+    .outcome-pill[data-outcome*=handoff] { background:#fff2df; color:#a35f0b; }
+    .outcome-pill[data-outcome*=message] { background:#f0f1f3; color:#626c79; }
+    .outcome-pill[data-outcome*=transfer] { background:#eef3fb; color:#426d9b; }
+    .dashboard-filters { display:flex; flex-wrap:wrap; align-items:end; gap:9px; margin:0; }
+    .dashboard-filters label { min-width:140px; }
+    .dashboard-filters input,.dashboard-filters select { width:100%; height:38px; min-width:0; padding:0 11px; font-size:12px; }
+    .dashboard-filters > .muted { padding-bottom:9px; font-size:11px; }
+    [data-role=audit-rows] { overflow-x:auto; }
+    .audit-scroll { overflow-x:auto; border:1px solid var(--line); border-radius:14px; background:#fff; }
+    .audit-table { width:100%; min-width:800px; border-collapse:collapse; background:#fff; font-size:10px; }
+    .audit-table th { padding:11px 13px; text-align:left; color:#7a818b; background:#fafbfc; font-size:9px; letter-spacing:.05em; text-transform:uppercase; }
+    .audit-table th:nth-child(1) { width:140px; }
+    .audit-table th:nth-child(2) { width:190px; }
+    .audit-table th:nth-child(3) { width:200px; }
+    .audit-table th:nth-child(4) { width:155px; }
+    .audit-row td { padding:12px 13px; border-top:1px solid #eff0f2; overflow-wrap:anywhere; vertical-align:top; }
+    .audit-row td:first-child { white-space:nowrap; color:#69717d; }
+    .small { font-size:11px; }
+    @media(max-width:1050px) { .workspace { grid-template-columns:minmax(0,1fr) 270px; } .dashboard-grid { grid-template-columns:1fr 1fr; grid-template-areas:"topics topics" "language language" "unresolved unresolved" "privacy privacy"; } }
+    @media(max-width:850px) { .workspace { grid-template-columns:1fr; } .workspace aside { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; } .workspace aside .block:last-child { grid-column:1/-1; } .metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .case-heading { flex-wrap:wrap; } .actions { margin-left:0; } }
+    @media(max-width:760px) { .topbar { height:auto; min-height:58px; flex-wrap:wrap; padding:0 12px; gap:10px; } .nav { order:3; width:100%; height:40px; } .nav button { flex:1; height:40px; padding:0 7px; font-size:11px; } .identity { margin-left:auto; } .identity-name { display:none; } main { padding:16px 11px; } .page-head { flex-wrap:wrap; margin-bottom:14px; } .page-head h1 { font-size:19px; } .page-head .toolbar { width:100%; } .queue-panel-head { padding:13px; } [data-role=queue] { grid-template-columns:1fr; } .workspace aside { grid-template-columns:1fr; } .workspace aside .block:last-child { grid-column:auto; } .case-heading { padding:12px; } .actions button { padding:7px; font-size:10px; } [data-role=summary], [data-role=draft] { margin:10px; font-size:10px; } [data-role=transcript] { height:31vh; min-height:190px; padding:12px; } [data-role=line] { font-size:11px; max-width:88%; } [data-role=suggestions] { grid-template-columns:1fr; margin:8px 12px; } [data-role=suggestion] { min-height:0; } .metric-grid { grid-template-columns:1fr 1fr; gap:8px; } .metric { padding:12px; min-height:90px; } .metric strong { font-size:20px; } .dashboard-grid { grid-template-columns:1fr; grid-template-areas:"topics" "language" "unresolved" "privacy"; gap:10px; } .dashboard-grid > .card { height:auto; padding:13px; } .dashboard-filters { width:100%; } .topic-row { grid-template-columns:minmax(90px,130px) minmax(0,1fr) 30px; gap:7px; } .language-grid { gap:8px; margin-top:12px; } .language-card { padding:10px; } .audit-filters { align-items:stretch; } .audit-filters label { flex-basis:100%; } .audit-filters > button,.audit-exports { width:100%; margin-left:0; } .audit-exports > button { flex:1; } .audit-table { min-width:720px; } }
   </style>
 </head>
 <body>
-<main>
-  <h1>Support console</h1>
-
-  <form data-role="login-form" class="card" style="max-width: 22rem">
-    <h2>Agent login</h2>
-    <label>Agent id <input data-role="agent-id" type="text" autocomplete="username" /></label>
-    <label>Password <input data-role="agent-password" type="password" autocomplete="current-password" /></label>
-    <button class="primary" type="submit">Sign in</button>
-    <p class="error" data-role="login-error" role="alert"></p>
-  </form>
-
-  <div data-role="console" hidden>
-    <p class="note"><span data-role="agent-name"></span> · <button data-role="logout" type="button">Sign out</button></p>
-    <div class="grid">
-      <section class="card">
-        <h2>Cases</h2>
-        <div data-role="queue"></div>
-        <p class="note" data-role="queue-empty">No cases yet.</p>
-      </section>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">B</span>BPay Support</div>
+    <nav class="nav" aria-label="Agent workspace" data-role="navigation" hidden>
+      <button data-role="inbox-open" type="button" aria-current="page">Inbox</button>
+      <button data-role="dashboard-open" type="button" hidden>Dashboard</button>
+      <button data-role="audit-open" type="button" hidden>Audit</button>
+    </nav>
+    <span class="spacer"></span>
+    <div class="identity" data-role="identity" hidden><span class="identity-name" data-role="agent-name"></span><button data-role="logout" type="button">Sign out</button></div>
+  </header>
+  <section data-role="login-form" class="login-wrap" aria-labelledby="login-title">
+    <form class="card login-card">
+      <h1 id="login-title">Welcome back</h1>
+      <p>Sign in with your support-team credentials to manage customer cases.</p>
+      <label>Agent ID <input data-role="agent-id" type="text" autocomplete="username" required /></label>
+      <label>Password <input data-role="agent-password" type="password" autocomplete="current-password" required /></label>
+      <button class="primary" type="submit">Sign in</button>
+      <p class="error" data-role="login-error" role="alert" aria-live="polite"></p>
+      <div class="secure-note">Access is limited to authorized support staff. Dashboard and audit access depend on your role.</div>
+    </form>
+  </section>
+  <main data-role="console" hidden>
+    <section data-role="queue-screen" aria-labelledby="inbox-title">
+      <div class="page-head"><div><h1 id="inbox-title">Inbox</h1><p>Customer cases, ordered by priority and waiting time.</p></div><span class="spacer"></span><div class="toolbar" aria-label="Search cases"><input data-role="queue-search" type="search" placeholder="Search cases or reference" aria-label="Search cases or reference" /><select data-role="queue-status" aria-label="Filter by case status"><option value="active">All active</option><option value="waiting">Waiting</option><option value="with_agent">With an agent</option><option value="resolved">Resolved</option></select></div></div>
+      <section class="card queue-panel" aria-label="Case queue"><div class="queue-panel-head"><h2>Active cases <span class="queue-count" data-role="queue-count"></span></h2><p class="note">Priority first · longest wait next</p><div class="toolbar" aria-label="Filter active cases"><label class="small">Status <select data-role="queue-status-detail" aria-label="Filter cases by status"><option value="all">All statuses</option><option value="waiting">Waiting</option><option value="with_agent">With an agent</option><option value="resolved">Resolved</option></select></label><label class="small">Language <select data-role="queue-language" aria-label="Filter by conversation language"><option value="all">All languages</option><option value="en">English</option><option value="fr">French</option></select></label><span class="note small" data-role="queue-thresholds" aria-live="polite"></span></div></div><div data-role="queue" aria-live="polite"></div><p class="note" data-role="queue-empty" role="status">No active cases.</p><p class="error" data-role="queue-error" role="alert"></p></section>
+    </section>
+    <section data-role="case-screen" hidden aria-labelledby="case-page-title">
+      <button class="back-button" data-role="back-to-queue" type="button">← Back to queue</button>
       <section class="card" data-role="detail" hidden>
-        <h2 data-role="detail-ref"></h2>
-        <p>State: <b data-role="detail-state"></b> · Claimed by: <span data-role="detail-claimed-by"></span></p>
-        <div data-role="transcript"></div>
-        <div class="row">
-          <button class="primary" data-role="claim" type="button">Claim this case</button>
-          <button data-role="resolve" type="button">Mark resolved</button>
+        <div class="case-heading">
+          <div><h1 id="case-page-title" data-role="detail-ref"></h1><p class="case-meta"><span data-role="detail-state"></span> · Assigned to <span data-role="detail-claimed-by"></span> <span class="pill priority" data-role="priority" hidden>Priority · wrong transfer</span><span data-role="detail-wait" class="small"></span></p></div>
+          <div class="actions"><button class="primary" data-role="claim" type="button">Claim / take over</button><select data-role="transfer-to" aria-label="Colleague to transfer to"></select><button data-role="transfer" type="button">Transfer</button><button data-role="resolve" type="button">Mark resolved</button></div>
         </div>
-        <p class="error" data-role="claim-error" role="alert"></p>
-        <form data-role="reply-form" class="row">
-          <input data-role="reply-input" type="text" maxlength="1000" autocomplete="off" placeholder="Reply to the customer…" />
-          <button data-role="reply-send" type="submit">Send</button>
-        </form>
+        <p class="error" data-role="claim-error" role="alert" aria-live="polite"></p>
+        <div data-role="draft" class="block" hidden><h3>Customer's draft</h3><div data-role="draft-text"></div></div>
+        <div data-role="summary" class="block" hidden><h3 data-role="summary-label"></h3><div data-role="summary-text"></div></div>
+        <div class="workspace" data-role="workspace">
+          <section data-role="chat" aria-label="Customer conversation">
+            <details data-role="transcript-box" open><summary>Conversation transcript</summary><div data-role="transcript" aria-live="polite"></div></details>
+            <div class="row responsive"><label class="small" for="suggest-count">Draft replies</label><select id="suggest-count" data-role="suggest-count" aria-label="Number of draft replies"><option value="1">1 draft</option><option value="2">2 drafts</option><option value="3" selected>3 drafts</option></select><button data-role="suggest" type="button">Suggest replies</button><span class="note small">Drafts only · choose to edit, then send</span></div>
+            <p class="note" data-role="suggestions-message" role="status" aria-live="polite"></p><div data-role="suggestions"></div>
+            <form data-role="reply-form" class="row responsive"><textarea data-role="reply-input" maxlength="1000" autocomplete="off" aria-label="Reply to the customer" placeholder="Write a reply to the customer…"></textarea><button class="primary" data-role="reply-send" type="submit">Send reply</button></form>
+          </section>
+          <aside data-role="side" aria-label="Case details">
+            <div data-role="records-box" class="block" hidden><h3>Recent transactions · masked</h3><div data-role="records"></div></div>
+            <section data-role="notes-box" class="block"><h3>Internal notes · agent only</h3><div data-role="notes"></div><form data-role="note-form" class="row responsive"><input data-role="note-input" type="text" maxlength="1000" autocomplete="off" aria-label="Add a private internal note" placeholder="Add a private note…" /><button data-role="note-add" type="submit">Add note</button></form><p class="error" data-role="note-error" role="alert"></p></section>
+          </aside>
+        </div>
       </section>
-    </div>
-  </div>
-</main>
-<script src="/console.js"></script>
+    </section>
+    <section data-role="dashboard-panel" hidden aria-labelledby="dashboard-title">
+      <div class="section-head"><div><h1 id="dashboard-title">Dashboard</h1><p class="note">Service trends from masked audit and failed-question records.</p></div><form data-role="dashboard-form" class="dashboard-filters"><label>From <input data-role="dashboard-from" type="date" aria-label="Dashboard from date" /></label><span class="muted">to</span><label>To <input data-role="dashboard-to" type="date" aria-label="Dashboard to date" /></label><label>Language <select data-role="dashboard-language" aria-label="Dashboard language"><option value="all">All languages</option><option value="en">English</option><option value="fr">French</option></select></label><button type="submit">Apply</button></form></div>
+      <p class="error" data-role="dashboard-error" role="alert"></p><p class="note" data-role="dashboard-note" role="status"></p>
+      <div class="metric-grid"><article class="card metric"><label>Conversations</label><strong data-role="dashboard-conversations"></strong><span class="note small">In selected period</span></article><article class="card metric"><label>Handoff rate</label><strong data-role="dashboard-handoff"></strong><span class="note small">Cases opened / conversations</span></article><article class="card metric"><label>Assistant-resolved</label><strong data-role="dashboard-resolved"></strong><span class="note small">No handoff or refusal</span></article><article class="card metric"><label>Unresolved topics</label><strong data-role="dashboard-unresolved-count"></strong><span class="note small">Masked failed questions</span></article></div>
+      <div class="dashboard-grid"><section class="card dashboard-topics"><h2>Top answered topics</h2><p class="note">Grouped by guide or read-only tool used.</p><div class="data-list" data-role="dashboard-top"></div></section><section class="card dashboard-language"><h2>Language coverage</h2><p class="note">Conversation volume and outcomes by reply language.</p><div class="language-grid" data-role="dashboard-languages"></div><p class="soft-note small" data-role="dashboard-language-note"></p></section><section class="card dashboard-unresolved"><h2>Unresolved questions</h2><p class="note">Masked questions without a verified answer; use them to improve approved guides.</p><div class="data-list" data-role="dashboard-unresolved"></div></section><section class="card dashboard-privacy"><h2>How to read this dashboard</h2><p class="note">These are operational indicators, not customer-level analytics.</p><p class="soft-note">No names, account numbers, message transcripts or transaction details are shown here. Counts come from masked audit and failed-question records.</p></section></div>
+    </section>
+    <section data-role="audit-panel" hidden aria-labelledby="audit-title">
+      <div class="section-head"><div><h1 id="audit-title">Audit log</h1><p class="note">Read-only record of assistant, case, and agent events.</p></div><span class="pill">Restricted access</span></div>
+      <p class="note">Audit access is limited to authorized roles. Filters and exports are recorded in the audit log.</p>
+      <form data-role="audit-form" class="audit-filters"><label>Conversation ID <input data-role="audit-conversation" type="text" placeholder="e.g. conv…" /></label><label>Outcome <input data-role="audit-outcome" type="text" list="audit-outcomes" placeholder="All events" /></label><datalist id="audit-outcomes"><option value="ok"></option><option value="case_claimed"></option><option value="case_claimed_after_rebroadcast"></option><option value="case_transferred"></option><option value="case_resolved"></option><option value="case_reopened"></option><option value="case_note_added"></option><option value="handoff_opened"></option><option value="internal_note_added"></option><option value="customer_message"></option><option value="answer_feedback"></option><option value="audit_exported"></option><option value="conversation_denied"></option><option value="session_started"></option><option value="draft_emailed"></option></datalist><label>From <input data-role="audit-from" type="date" /></label><label>To <input data-role="audit-to" type="date" /></label><button class="primary" type="submit">Apply filters</button><div class="audit-exports"><button data-role="audit-export-csv" type="button">Download CSV</button><button data-role="audit-export-json" type="button">Download JSON</button></div></form>
+      <p class="error" data-role="audit-error" role="alert"></p><div class="audit-scroll" data-role="audit-rows" aria-live="polite"></div>
+    </section>
+  </main>
+  <script src="/console.js"></script>
 </body>
 </html>

@@ -3,7 +3,7 @@ id: request-to-pay
 audience: individual (send, track, cancel); payer confirms from Payments
 route: /request-to-pay and /payments
 package: DDPA, DDPC (any one)
-verified-on: DRAFT 2026-10-12, code read only, owner to validate
+verified-on: 2026-10-14, bank approval confirmed by user
 ---
 # Request money, and confirm a request you received
 

@@ -4,6 +4,8 @@ import { startService } from './harness/start-service.js';
 import { createFakeModel } from './harness/fake-model.js';
 import { createGuideModel } from './harness/guide-model.js';
 import { chatTurn } from './harness/sse.js';
+import { createFakeClock } from './harness/fake-clock.js';
+import { call } from './harness/cases.js';
 import { loadGuides } from '../src/guides.js';
 
 const GUIDES = new URL('../guides/', import.meta.url);
@@ -72,7 +74,7 @@ test('a busy turn makes the chip prominent, whether the limit hit before or duri
   const svc = await startService({ model: createFakeModel(['ok']), limits: { messagesPerMinute: 1 } });
   t.after(svc.close);
 
-  await chatTurn(svc.baseUrl, { message: 'hello there', tenant: 'demo' });
+  await chatTurn(svc.baseUrl, { message: 'Can you explain this?', tenant: 'demo' });
   const { events } = await chatTurn(svc.baseUrl, { message: 'and again', tenant: 'demo' });
 
   assert.equal(events.some((e) => e.type === 'busy'), true);
@@ -128,7 +130,7 @@ test('an unknown escalate tag from the model changes nothing', async (t) => {
   const svc = await startService({ model: createFakeModel(['[[escalate:open_handoff]]Done.']) });
   t.after(svc.close);
 
-  const { events } = await chatTurn(svc.baseUrl, { message: 'Hello there', tenant: 'demo' });
+  const { events } = await chatTurn(svc.baseUrl, { message: 'Can you explain this?', tenant: 'demo' });
 
   assert.equal(chipOf(events).prominent, false);
   assert.equal(events.some((e) => e.type === 'handoff'), false);
@@ -153,3 +155,27 @@ test('no turn, however alarming, opens a handoff or reports one', async (t) => {
   assert.equal(chipOf(events).prominent, true);
   assert.deepEqual(events.map((e) => e.type).filter((x) => /handoff|case|page/.test(x)), []);
 });
+
+// Story 16: opening hours only affect human paging; the chat path never reads them.
+for (const [label, iso] of [['03:00 on a Tuesday night', '2026-10-13T02:00:00Z'], ['noon on a Sunday', '2026-10-11T11:00:00Z']]) {
+  test(`at a closed hour (${label}) a chat turn still gets a normal reply and the chip, and only the handoff is queued`, async (t) => {
+    const clock = createFakeClock(Date.parse(iso));
+    const svc = await startService({ model: createFakeModel(['Open Transfers.']), clock });
+    t.after(svc.close);
+
+    const { events } = await chatTurn(svc.baseUrl, { message: 'How do I send money?', tenant: 'demo' });
+
+    assert.equal(events.filter((e) => e.type === 'delta').map((e) => e.text).join(''), 'Open Transfers.');
+    assert.deepEqual(chipOf(events), { type: 'chip', prominent: false, reasons: [] });
+    assert.equal(events.at(-1).type, 'done');
+    assert.equal(events.some((e) => e.type === 'busy' || /closed|after.hours/i.test(JSON.stringify(e))), false);
+
+    const res = await call(svc.baseUrl, 'POST', '/handoff', { token: 'test-token', body: { conversationId: events.at(-1).conversationId } });
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.state, 'waiting');
+    assert.equal(res.body.queued, true);
+    assert.match(res.body.queuedNotice, /closed right now/i);
+    assert.equal(svc.mailer.outbox.every((m) => m.to !== 'aline@bank.test'), true, 'the on-call agent is not paged until the shift starts');
+  });
+}

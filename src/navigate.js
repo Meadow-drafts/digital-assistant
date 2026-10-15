@@ -14,6 +14,7 @@ function checkRoute(id, route) {
   if (FORBIDDEN.test(route.path)) fail('this page is never linked');
   if (route.path.split('/').some((segment) => /^\d+$/.test(segment))) fail('a path with a record id is never linked');
   if (!route.labels?.en || !route.labels?.fr) fail('labels are needed in English and French');
+  if (route.cta !== undefined && !(route.cta?.en && route.cta?.fr)) fail('cta needs text in English and French');
 }
 
 export function parseNavigation(config) {
@@ -48,7 +49,7 @@ function refusalFor(route, entitlements) {
 // The pages this customer may be offered, for the model's list. The same rules as validateProposal, so a page
 // that would be dropped is not suggested in the first place.
 export function offeredPages(navigation, language, entitlements) {
-  return [...navigation.routes].filter(([, route]) => !route.prefillOnly && !refusalFor(route, entitlements))
+  return [...navigation.routes].filter(([, route]) => !refusalFor(route, entitlements))
     .map(([id, route]) => ({ id, label: route.labels[language] ?? route.labels.en }));
 }
 
@@ -57,13 +58,15 @@ const cardOf = (navigation, id, route, language) => ({
   target: id,
   path: route.path,
   label: route.labels[language] ?? route.labels.en,
-  button: navigation.button[language] ?? navigation.button.en,
+  button: route.cta?.[language] ?? route.cta?.en ?? navigation.button[language] ?? navigation.button.en,
 });
 
-// A prefillOnly page (the airtime form) can be opened by a pre-fill card, never by a plain navigate card.
-export function validateProposal(navigation, id, language, entitlements, { forPrefill = false } = {}) {
+// The page id whose path is exactly this one (a guide's own page), or null.
+export const routeIdForPath = (navigation, path) => [...navigation.routes].find(([, route]) => route.path === path)?.[0] ?? null;
+
+export function validateProposal(navigation, id, language, entitlements) {
   const route = navigation.routes.get(id);
-  if (!route || (route.prefillOnly && !forPrefill)) return { ok: false, reason: 'unknown_action' };
+  if (!route) return { ok: false, reason: 'unknown_action' };
   const reason = refusalFor(route, entitlements);
   return reason ? { ok: false, reason } : { ok: true, card: cardOf(navigation, id, route, language) };
 }

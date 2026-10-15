@@ -3,7 +3,7 @@ id: airtime
 audience: individual
 route: /payments/value-added-services
 package: LOAR, CEAR (any one)
-verified-on: DRAFT 2026-10-12, code read only, owner to validate
+verified-on: 2026-10-14, bank approval confirmed by user
 ---
 # Buy airtime
 

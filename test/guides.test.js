@@ -20,6 +20,43 @@ test('every shipped guide exists in both English and French', () => {
   assert.deepEqual(checkGuidePairs(GUIDES), []);
 });
 
+// Story 7's task list. Each task is covered by a guide pair or by an entry in
+// guides/UNSUPPORTED.md (matched by its bold title), never by neither.
+const STORY_7_TASKS = {
+  'domestic transfers': { guides: ['transfer-single'] },
+  'international transfers': { unsupported: 'International transfer' },
+  beneficiaries: { unsupported: 'Saved beneficiaries' },
+  'bill payment': { guides: ['bill-payment'] },
+  'merchant payment': { guides: ['merchant-payment'] },
+  airtime: { guides: ['airtime'] },
+  'request to pay': { guides: ['request-to-pay'] },
+  'cardless withdrawal': { guides: ['cardless'] },
+  'bulk transfers and validations': { guides: ['transfer-bulk', 'validations'] },
+  'history and statements': { guides: ['history-statement'] },
+  cards: { guides: ['cards'] },
+  'settings and PIN change': { guides: ['settings-connects', 'settings-pin'] },
+};
+
+function uncovered(guides, tasks) {
+  return Object.entries(tasks)
+    .filter(([, { guides: ids = [], unsupported }]) => {
+      const guided = ids.length > 0 && ids.every((id) => guides.has(id));
+      const declined = unsupported !== undefined && guides.unsupported.includes(`**${unsupported}.**`);
+      return !guided && !declined;
+    })
+    .map(([task]) => task);
+}
+
+test('every task in story 7 has a guide pair or an unsupported entry', () => {
+  assert.deepEqual(uncovered(loadGuides(GUIDES), STORY_7_TASKS), []);
+});
+
+test('a task with neither a guide nor an unsupported entry is reported', () => {
+  const dir = dirWith({ 'a.en.md': guide('a', 'A'), 'a.fr.md': guide('a', 'A fr'), 'UNSUPPORTED.md': '- **Gone.** nope\n' });
+  const tasks = { covered: { guides: ['a'] }, declined: { unsupported: 'Gone' }, forgotten: { guides: ['missing'] }, unlisted: { unsupported: 'Never listed' } };
+  assert.deepEqual(uncovered(loadGuides(dir), tasks), ['forgotten', 'unlisted']);
+});
+
 test('a guide present in one language only fails the check and refuses to load', () => {
   const dir = dirWith({ 'a.en.md': guide('a', 'A'), 'a.fr.md': guide('a', 'A fr'), 'b.en.md': guide('b', 'B'), 'c.fr.md': guide('c', 'C') });
   assert.deepEqual(checkGuidePairs(dir).sort(), ['b (missing fr)', 'c (missing en)']);

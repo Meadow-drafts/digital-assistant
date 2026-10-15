@@ -8,7 +8,7 @@ test('a message streams a reply and ends with a done event', async (t) => {
   const svc = await startService({ model: createFakeModel([['Hello', ' there']]) });
   t.after(svc.close);
 
-  const { status, events } = await chatTurn(svc.baseUrl, { message: 'Hi', tenant: 'demo' });
+  const { status, events } = await chatTurn(svc.baseUrl, { message: 'Can you explain this?', tenant: 'demo' });
 
   assert.equal(status, 200);
   assert.equal(events[0].type, 'thinking');
@@ -48,20 +48,20 @@ test('every turn writes one audit record with the fields and without secrets', a
   t.after(svc.close);
   await svc.clock.advance(5000);
 
-  const { events } = await chatTurn(svc.baseUrl, { message: 'Hi there', tenant: 'demo' }, { token: 'SECRET-TOKEN-123' });
+  const { events } = await chatTurn(svc.baseUrl, { message: 'Can you explain this?', tenant: 'demo' }, { token: 'SECRET-TOKEN-123' });
 
   assert.equal(svc.audit.records.length, 1);
   const rec = svc.audit.records[0];
   assert.equal(rec.time, new Date(svc.clock.now()).toISOString());
   assert.equal(rec.tenant, 'demo');
   assert.equal(rec.conversationId, events.at(-1).conversationId);
-  assert.equal(rec.userText, 'Hi there');
+  assert.equal(rec.userText, 'Can you explain this?');
   assert.equal(rec.replyText, 'Sure.');
   assert.equal(rec.language, 'en');
   assert.equal(rec.model, 'fake-model');
   assert.equal(rec.outcome, 'ok');
   assert.equal(typeof rec.latencyMs, 'number');
-  assert.match(rec.user, /^[0-9a-f]{12}$/);
+  assert.match(rec.user, /^(guest-|sub-)?[0-9a-f]{12}$/, 'a pseudonym, never the token');
   assert.ok(!JSON.stringify(rec).includes('SECRET-TOKEN-123'));
 });
 
@@ -69,7 +69,7 @@ test('a failing model is reported to the customer and still audited', async (t) 
   const svc = await startService({ model: createFakeModel([new Error('provider down')]) });
   t.after(svc.close);
 
-  const { events } = await chatTurn(svc.baseUrl, { message: 'Hi', tenant: 'demo' });
+  const { events } = await chatTurn(svc.baseUrl, { message: 'Can you explain this?', tenant: 'demo' });
 
   assert.equal(events.at(-1).type, 'error');
   assert.equal(svc.audit.records.length, 1);

@@ -5,11 +5,9 @@ import { bankRoutes, customer } from './bank-fixtures.js';
 import { chatTurn } from './sse.js';
 import { loadGuides } from '../../src/guides.js';
 import { loadNavigation } from '../../src/navigate.js';
-import { loadPrefill } from '../../src/prefill.js';
 
 export const GUIDES = new URL('../../guides/', import.meta.url);
 export const NAVIGATION = new URL('../../config/navigate-routes.json', import.meta.url);
-export const PREFILL = new URL('../../config/prefill.json', import.meta.url);
 export const TENANT = 'demo';
 
 // The router call picks a tool; every other call answers from the data it was given.
@@ -22,7 +20,7 @@ export const bob = () => customer({ sub: '237655000222', cli: 'CLI-B', accountNo
 export async function start({ customers, model, ...rest }) {
   const gateway = createFakeGateway(bankRoutes(customers, rest.fixtures));
   const navigation = loadNavigation(NAVIGATION);
-  const svc = await startService({ guides: loadGuides(GUIDES), navigation, prefill: loadPrefill(PREFILL, navigation), gateway, model, ...rest });
+  const svc = await startService({ guides: loadGuides(GUIDES), navigation, gateway, model, ...rest });
   return svc;
 }
 export const GATING = { usePackages: false, primaryConnect: true };

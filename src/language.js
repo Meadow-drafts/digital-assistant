@@ -3,20 +3,21 @@
 // than trusting any single signal. Ties keep the previous language, else 'en'.
 const FR = new Set(('le la les un une des du de au aux et ou est sont je j ai jai tu il elle nous vous ils ne pas pour par sur avec dans ' +
   'mon ma mes ton ta son sa ses notre votre mais que qui quoi comment ou quand pourquoi combien ce cet cette ces ' +
-  'faire fait veux peux puis dois recu recus merci bonjour salut svp compte virement argent solde facture ' +
+  'faire fait veux peux puis dois recu recus merci bonjour bonsoir salut coucou svp compte virement argent solde facture accord compris entendu ca marche bien sur au bonne nuit bonne soiree journee bientot demain ' +
   'envoyer payer pas ete etre avoir cest').split(' '));
 const EN = new Set(('the a an and or is are am i you he she we they not for by on with in my your our his her their but that who what how ' +
   'where when why which this these those do does did can could would should will want need have has had send pay ' +
-  'to of it its me please thanks thank hello hi money account transfer bill balance').split(' '));
+  'to of it its me please thanks thank hello hi good morning afternoon evening night goodbye bye care see money account transfer bill balance').split(' '));
 
 export function detectLanguage(text, previous = 'en') {
   const words = text.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').match(/[a-z]+/g) ?? [];
   let fr = (text.match(/[àâçéèêëîïôùûüœ]/gi) ?? []).length;
   let en = 0;
+  let latest = previous;
   for (const w of words) {
-    if (FR.has(w)) fr++;
-    if (EN.has(w)) en++;
+    if (FR.has(w)) { fr++; latest = 'fr'; }
+    if (EN.has(w)) { en++; latest = 'en'; }
   }
-  if (fr === en) return previous;
+  if (fr === en) return latest;
   return fr > en ? 'fr' : 'en';
 }
