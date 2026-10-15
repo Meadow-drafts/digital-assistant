@@ -66,9 +66,13 @@ export function assertStartup({ env, support, modelConfig, tenants = {} }) {
     problems.push('a real mailer: mail.mode must be "smtp" to a real server (not localhost), with a real mail.from sender');
   }
 
-  const testServers = Object.entries(tenants).filter(([, url]) => /bipay-test/i.test(url));
+  const testServers = Object.entries(tenants).filter(([, value]) => /bipay-test/i.test(typeof value === 'string' ? value : value?.baseUrl ?? ''));
   if (testServers.length) {
-    problems.push(`a production gateway: tenant ${testServers.map(([id]) => `"${id}"`).join(', ')} in config/tenants.json points at the test server (bipay-test)`);
+    problems.push(`a production gateway: tenant ${testServers.map(([id]) => `"${id}"`).join(', ')} in the gateway allowlist points at the test server (bipay-test)`);
+  }
+  const insecureGateways = Object.entries(tenants).filter(([, value]) => /^http:\/\//i.test(typeof value === 'string' ? value : value?.baseUrl ?? ''));
+  if (insecureGateways.length) {
+    problems.push(`HTTPS gateway origins: tenant ${insecureGateways.map(([id]) => `"${id}"`).join(', ')} uses HTTP, which does not protect the forwarded teller token`);
   }
 
   for (const name of ['TEST_TOKEN', 'TEST_CLI', 'TEST_PORTAL_FLAG']) {

@@ -36,11 +36,22 @@ const scriptedModel = {
 // live in that file in plain text; the production gate refuses them.
 // Mode gate (ticket 35, below): ASSISTANT_MODE=production refuses to start unless every prerequisite is met; demo
 // needs none. It runs before anything is opened or created.
-if (process.env.ASSISTANT_PROFILE === 'bicec-agency' && !process.env.AGENCY_GATEWAY_BASE_URL) {
-  throw new Error('AGENCY_GATEWAY_BASE_URL is required for the isolated BICEC agency assistant');
+const agencyMode = ['bicec-agency', 'agency-banking'].includes(process.env.ASSISTANT_PROFILE);
+if (process.env.ASSISTANT_PROFILE === 'agency-banking' && !process.env.ASSISTANT_TENANT_ID) {
+  throw new Error('ASSISTANT_TENANT_ID is required for an agency deployment (bicec-agency or iwomi-agency)');
 }
-const agencyProfile = process.env.ASSISTANT_PROFILE === 'bicec-agency'
-  ? loadAgencyProfile(new URL('../config/agency-bicec/profile.json', import.meta.url))
+let agencyTenantOverrides = {};
+if (process.env.AGENCY_GATEWAY_TENANTS) {
+  try { agencyTenantOverrides = JSON.parse(process.env.AGENCY_GATEWAY_TENANTS); } catch { throw new Error('AGENCY_GATEWAY_TENANTS must be a JSON object mapping agency tenant ids to gateway origins'); }
+  if (!agencyTenantOverrides || Array.isArray(agencyTenantOverrides) || typeof agencyTenantOverrides !== 'object') {
+    throw new Error('AGENCY_GATEWAY_TENANTS must be a JSON object mapping agency tenant ids to gateway origins');
+  }
+}
+const agencyProfile = agencyMode
+  ? loadAgencyProfile(new URL('../config/agency-bicec/profile.json', import.meta.url), {
+    tenantId: process.env.ASSISTANT_TENANT_ID ?? (process.env.ASSISTANT_PROFILE === 'bicec-agency' ? 'bicec-agency' : undefined),
+    tenantOverrides: agencyTenantOverrides,
+  })
   : null;
 if (process.env.ASSISTANT_PROFILE && !agencyProfile) throw new Error(`unsupported ASSISTANT_PROFILE: ${process.env.ASSISTANT_PROFILE}`);
 const agencyPath = (relative) => new URL(`../${relative}`, import.meta.url);
@@ -73,7 +84,9 @@ for (const o of allowedOrigins) {
 }
 const outputAllowlist = { urlHosts: list('OUTPUT_ALLOW_URL_HOSTS'), emails: list('OUTPUT_ALLOW_EMAILS'), phones: list('OUTPUT_ALLOW_PHONES') };
 // Pages the assistant may offer as cards; the bank edits this file when the portal's routes change.
-const navigation = agencyProfile ? null : loadNavigation(process.env.NAVIGATE_ROUTES ?? new URL('../config/navigate-routes.json', import.meta.url));
+const navigation = loadNavigation(agencyProfile
+  ? agencyPath(agencyProfile.navigationConfig)
+  : process.env.NAVIGATE_ROUTES ?? new URL('../config/navigate-routes.json', import.meta.url));
 // The assistant provides verified steps and allowlisted page links. Customers enter all values themselves.
 const port = Number(process.env.PORT ?? 3000);
 const agents = support.agents;

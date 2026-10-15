@@ -64,7 +64,7 @@ export function createDrafts({ identity, t1, entitlementsFor, conversations, han
     const conversation = typeof body?.conversationId === 'string' ? conversations.get(body.conversationId) : undefined;
     if (!conversation || conversation.owner !== who.owner) { json(res, 404, { error: 'not_found' }); return; }
     const language = conversation.language;
-    const tenant = tenantId ?? body.tenant;
+    const tenant = tenantId ?? (agencyProfile ? conversation.session?.tenant ?? null : body.tenant);
     const entitlements = await entitlementsFor(req, tenant, conversation);
     const found = !agencyProfile && t1 ? await t1.caseTransaction(conversation, tokenOf(req), entitlements, body.reference ?? conversation.lastReference) : null;
     const details = found ? detailLines(found.transaction, language) : [];

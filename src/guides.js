@@ -99,6 +99,7 @@ export function loadGuides(dirArg) {
         entry.customerCatalogue = Boolean(meta['verified-on']) && !/^DRAFT\b/i.test(meta['verified-on']);
         entry.packages = packagesOf(meta.package ?? '');
         entry.route = /^\/[A-Za-z0-9\-/]*/.exec(meta.route ?? '')?.[0] ?? null; // the first plain path, if the guide names one
+        entry.navigation = meta.navigation || null;
         entry.primaryOnly = /\(primary connect only\)/.test(meta.audience ?? '');
         entry.roles = new Set((meta.audience ?? '').match(/individual|merchant/g) ?? []);
       }

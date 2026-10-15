@@ -1,22 +1,29 @@
 ---
 id: 06-cardless-withdrawal
+route: /vouchers/cardless-withdrawal
 audience: teller
 verified-on: 2026-10-15
 ---
 # Cardless Withdrawal
 
-**Bank-approved teller guidance.** The workflow labels are retained as shown in the signed-in portal.
+## When to use
+A customer needs help with the Cardless Withdrawal workflow.
 
 ## Steps
+1. Open **Voucher Management** from the portal menu and select **Cardless Withdrawal**.
+2. Select the **Cardless Withdrawal** tab to create a withdrawal request, or **Cancel Request** to cancel an existing request.
+3. For a withdrawal, select the account to be debited, enter the recipient’s phone number and the amount (the form requires an amount in multiples of 5,000), then complete the sender-information prompts. For a cancellation, enter the request code instead.
+4. Click **Proceed** and review the transaction details shown by the portal. For a withdrawal, complete the cash-denomination tally if it appears: enter the number of notes and coins by denomination, check the tally total against the target amount, enter the collected amount, and confirm.
+5. Enter the transaction PIN in the portal and provide the OTP there if requested. Wait for the result; for a cancellation, confirm that the displayed result is for the intended request.
 
-1. In the agency portal, use the **Cardless Withdrawal** area and look for **Cardless Withdrawal**. This assistant does not provide a page link because workflow access has not been authoritatively verified.
-2. Read the page instructions and fields shown in your signed-in portal. Ask authorized agency support if the page or a field is unclear.
-3. You remain responsible for every teller action. The assistant does not fill or submit forms, execute transactions, or approve validations.
+## Common errors
+- The customer means a cash-out workflow rather than a cardless withdrawal: clarify which cash-out type they need, then switch to its guide.
+- A field is missing, disabled, or rejected: read the portal’s message and check the relevant information. Do not invent a value; ask authorized agency support if the message does not explain what to do.
+- The result is unclear or has not appeared: do not repeat the action. Check the status in the portal or ask authorized agency support.
 
-Fees, limits, eligibility, corridors and exceptions are not verified here. Check an authoritative bank source or ask authorized agency support.
+This guide does not confirm fees, limits, eligibility, corridors, or exceptions. Check an approved bank source for those details.
 
-The assistant never asks for your PIN or OTP.
+The assistant never asks for your PIN, OTP, or another authentication secret. Do not share one in chat.
 
 ## Talk to a human if
-
-Use the Human-agent option if this draft does not answer your question. Review and edit the case summary before handoff.
+The portal does not explain what to do next, a status remains unclear, or the customer needs help beyond these steps. Use the Human-agent option and review and edit the case summary before handoff.

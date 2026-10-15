@@ -1,13 +1,20 @@
 {
-  "id": "bicec-agency",
+  "id": "agency-banking",
+  "defaultTenant": "bicec-agency",
   "tenants": {
     "bicec-agency": {
-      "baseUrl": "https://agency-gateway.example.invalid",
-      "apiPrefix": "/agencybank"
+      "baseUrl": "https://m.bipay-test.bicec.com",
+      "apiPrefix": "/agencybank",
+      "dataDirectory": "data/agency-bicec",
+      "supportConfig": "config/agency-bicec/support.json"
+    },
+    "iwomi-agency": {
+      "baseUrl": "http://148.113.191.174:8765",
+      "apiPrefix": "/agencybank",
+      "dataDirectory": "data/agency-iwomi",
+      "supportConfig": "config/agency-iwomi/support.json"
     }
   },
-  "dataDirectory": "data/agency-bicec",
   "guidesDirectory": "guides-agency-bicec",
-  "supportConfig": "config/agency-bicec/support.json",
   "navigationConfig": "config/agency-bicec/navigate-routes.json"
 }

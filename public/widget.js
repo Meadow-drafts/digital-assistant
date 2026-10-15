@@ -405,6 +405,32 @@ class BankAssistant extends HTMLElement {
         .ba-root [data-role="human-chip"][data-prominent="true"] { background: var(--ba-brand-primary, #2458a8); border-color: var(--ba-brand-primary, #2458a8); color: var(--ba-on-primary, #fff); }
         .ba-root [data-role="clarification-options"] { display: flex; flex-wrap: wrap; gap: .4rem; margin: .4rem 0; }
         .ba-root [data-role="quick-replies"] { display: flex; flex-wrap: wrap; gap: .4rem; margin: .4rem 0; }
+        .ba-root [data-role="draft-panel"] { margin:12px 0;padding:18px;border:1px solid #e5e7eb;border-radius:16px;background:#fff;box-shadow:0 8px 24px #20242b12;color:#272a30; }
+        .ba-root [data-role="draft-title"] { margin:0 0 7px;font-size:19px;line-height:1.3;letter-spacing:-.2px;color:#272a30; }
+        .ba-root [data-role="draft-hint"] { margin:0 0 13px;color:#656c76;font-size:13px;line-height:1.5; }
+        .ba-root [data-role="draft-text"] { display:block;width:100%;min-height:142px;padding:12px;border:1px solid #d7dbe0;border-radius:11px;background:#fbfbfc;color:#272a30;font:inherit;font-size:14px;line-height:1.5;resize:vertical; }
+        .ba-root [data-role="draft-text"]:focus { outline:2px solid color-mix(in srgb,var(--ba-accent) 32%,transparent);border-color:var(--ba-accent); }
+        .ba-root [data-role="draft-details"] { margin:10px 0 14px;padding:10px 12px 10px 30px;border:1px solid #eceef0;border-radius:10px;background:#f7f8f9;color:#626974;font-size:12px;line-height:1.5; }
+        .ba-root [data-role="draft-destinations"] { display:grid;gap:7px;margin:0 0 14px;padding:0;border:0; }
+        .ba-root [data-role="draft-destinations"] label { display:flex;align-items:center;gap:9px;min-height:42px;padding:9px 11px;border:1px solid #e2e5e9;border-radius:10px;background:#fff;color:#343941;font-size:13px;line-height:1.35;cursor:pointer; }
+        .ba-root [data-role="draft-destinations"] label:has(input:checked) { border-color:var(--ba-accent);background:var(--ba-accent-soft); }
+        .ba-root [data-role="draft-destinations"] input { flex:none;accent-color:var(--ba-accent);margin:0; }
+        .ba-root [data-role="draft-panel"] [data-role="draft-review"],.ba-root [data-role="draft-panel"] [data-role="draft-send"] { min-height:40px;padding:9px 14px;border:1px solid var(--ba-accent);border-radius:10px;background:var(--ba-accent);color:var(--ba-on-primary,#fff);font-weight:650; }
+        .ba-root [data-role="draft-panel"] [data-role="draft-skip"],.ba-root [data-role="draft-panel"] [data-role="draft-discard"],.ba-root [data-role="draft-panel"] [data-role="draft-back"] { min-height:40px;margin:0 0 0 6px;padding:8px 12px;border:1px solid #dfe2e6;border-radius:10px;background:#fff;color:#4f5660; }
+        .ba-root [data-role="draft-panel"] [data-role="draft-discard"] { color:#7a4545; }
+        .ba-root [data-role="draft-confirm-note"] { margin:0 0 12px;color:#555c66;font-size:13px;line-height:1.5; }
+        .ba-root [data-role="preview-chat-box"],.ba-root [data-role="preview-email-box"] { margin:10px 0;padding:12px;border:1px solid #e5e7eb;border-radius:11px;background:#f8f9fa; }
+        .ba-root [data-role="preview-chat-box"] strong,.ba-root [data-role="preview-email-box"] strong { display:block;margin-bottom:7px;font-size:13px; }
+        .ba-root [data-role="preview-chat"],.ba-root [data-role="preview-email-body"] { margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:13px;line-height:1.5; }
+        .ba-root [data-role="draft-warning"] { margin:10px 0;padding:10px 12px;border-radius:9px;background:#fff7e8;color:#694b18;font-size:12px;line-height:1.45; }
+        .ba-root [data-role="draft-error"] { margin:8px 0 0;color:#a33b35;font-size:12px; }
+        @media(max-width:600px) { .ba-root [data-role="draft-panel"] { margin:8px 0;padding:15px; } .ba-root [data-role="draft-panel"] [data-role="draft-review"],.ba-root [data-role="draft-panel"] [data-role="draft-send"] { width:100%; } }
+        .ba-root [data-role="solved-prompt"] { display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:8px 0 2px;padding:7px 9px;border:1px solid #eceef0;border-radius:10px;background:#fafafb;color:#343941;width:fit-content;max-width:100%; }
+        .ba-root [data-role="solved-text"] { flex:0 1 auto;margin-right:3px;font-size:12px;font-weight:600;line-height:1.3; }
+        .ba-root [data-role="solved-yes"],.ba-root [data-role="solved-no"] { min-width:48px;padding:5px 9px;border:1px solid #dfe2e6;border-radius:7px;background:#fff;color:#414750;font-size:11px;font-weight:600;line-height:1.2; }
+        .ba-root [data-role="solved-yes"] { border-color:var(--ba-accent);background:var(--ba-accent);color:var(--ba-on-primary,#fff); }
+        .ba-root [data-role="solved-yes"]:hover { filter:brightness(.96); }
+        .ba-root [data-role="solved-no"]:hover { border-color:#bfc4cb;background:#f3f4f6; }
       </style>
       <section class="ba-root" data-role="root" aria-label="Assistant">
         <button class="ba-launcher" data-role="launcher" type="button" aria-label="Open BPay assistant" hidden><span aria-hidden="true">✦</span><span data-role="launcher-label">BPay</span></button>
@@ -1542,8 +1568,15 @@ class BankAssistant extends HTMLElement {
   }
 
   addClarification(event) {
-    const question = this.addMessage('assistant', event.question);
-    question.dataset.role = 'clarification-question';
+    // Some clarification turns stream their question as a delta first so the
+    // answer bubble can receive validated action links. Reuse that bubble
+    // instead of rendering the same question again from the clarification event.
+    const existing = [...this.q('messages').querySelectorAll('[data-role="message"][data-from="assistant"]')]
+      .find((message) => (message.querySelector('[data-role="message-content"]')?.textContent ?? '') === event.question);
+    if (!existing) {
+      const question = this.addMessage('assistant', event.question);
+      question.dataset.role = 'clarification-question';
+    }
     const choices = document.createElement('div');
     choices.dataset.role = 'clarification-options';
     const agentOption = (event.options ?? []).some((option) => /^(talk to (?:a )?human agent|talk to an agent|parler à un agent)$/i.test(option));

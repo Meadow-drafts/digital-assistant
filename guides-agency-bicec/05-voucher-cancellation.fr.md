@@ -5,18 +5,24 @@ verified-on: 2026-10-15
 ---
 # Annuler un code voucher
 
-**Guide guichet approuvé par la banque.** Les libellés du workflow sont repris tels qu’ils apparaissent dans le portail du guichet connecté.
+## Quand l’utiliser
+Un client demande de l’aide pour annuler un code voucher existant.
 
 ## Étapes
+1. Dans le menu du portail, ouvrez **Gestion des vouchers** et sélectionnez l’onglet **Annuler un code voucher**.
+2. Saisissez le code voucher existant et cliquez sur **Procéder**.
+3. Vérifiez que les détails affichés par le portail correspondent bien au code que le client souhaite annuler. Arrêtez-vous si le code ou les détails ne correspondent pas.
+4. Saisissez le code PIN de transaction dans le portail et l’OTP dans le portail s’il est demandé.
+5. Attendez le résultat de l’annulation. Un voucher annulé ne peut plus être utilisé. Si le résultat est en attente ou incertain, vérifiez son statut ou contactez le support agence habilité avant de réessayer.
 
-1. Dans le portail agence, utilisez la section **Annuler un code voucher** et recherchez **Annuler un code voucher**. Cet assistant ne fournit pas de lien vers une page, car l’accès au workflow n’a pas encore été vérifié par une source faisant autorité.
-2. Lisez les instructions et les champs affichés dans votre portail connecté. Demandez au support agence habilité si une page ou un champ n’est pas clair.
-3. Vous restez responsable de toute action de guichet. L’assistant ne remplit ni ne soumet de formulaire, n’exécute aucune transaction et n’approuve aucune validation.
+## Erreurs fréquentes
+- La demande concerne la création d’un code et non son annulation : consultez le guide Générer un code voucher. Si le code ou l’action demandée n’est pas clair, arrêtez-vous et contactez le support.
+- Un champ est manquant, désactivé ou refusé : lisez le message du portail et vérifiez l’information concernée. N’inventez pas de valeur ; si le message n’explique pas quoi faire, contactez le support agence habilité.
+- Le résultat n’est pas clair ou ne s’affiche pas : ne répétez pas l’action. Vérifiez son statut dans le portail ou demandez au support agence habilité.
 
-Les frais, plafonds, critères d’éligibilité, corridors et exceptions ne sont pas vérifiés ici. Consultez une source bancaire faisant autorité ou contactez le support agence habilité.
+Ce guide ne précise pas les frais, plafonds, critères d’éligibilité, corridors ou exceptions. Consultez une source bancaire approuvée pour ces informations.
 
-L’assistant ne demande jamais votre PIN ou OTP.
+L’assistant ne demande jamais votre PIN, OTP ou autre secret d’authentification. Ne le partagez pas dans le chat.
 
-## Contacter un agent
-
-Utilisez l’option Agent humain si ce brouillon ne répond pas à votre question. Relisez et modifiez le résumé du dossier avant le transfert.
+## Parlez à un agent si
+Le portail n’explique pas la prochaine étape, le statut reste incertain ou le client a besoin d’aide au-delà de ce guide. Utilisez l’option Agent humain, puis relisez et modifiez le résumé du dossier avant le transfert.

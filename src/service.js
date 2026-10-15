@@ -8,7 +8,7 @@ import { parseRefusal, refusalCard } from './refusals.js';
 import { BLOCKED, createOutputFilter } from './filter.js';
 import { chipState, cuesIn, parseEscalate, questionKey } from './chip.js';
 import { PROTECTED_TEXTS, modelHistory, UNSUPPORTED_ID, answerMessages, dataMessages, explainMessages, routerMessages } from './prompts.js';
-import { asksForUnavailable, asksToComplete, intentTool, isNavigationAsk, transferGuideIntent } from './intents.js';
+import { agencyCashWorkflowIntent, asksForUnavailable, asksToComplete, intentTool, isNavigationAsk, transferGuideIntent } from './intents.js';
 import { offeredPages, parseNavigate, routeIdForPath, stepsOf, validateProposal } from './navigate.js';
 import { GUIDE_ID, NEXT_STEP, OUTCOMES, TEXT as EXPLAIN_TEXT, parseNext } from './explain.js';
 import { MESSAGES as T1_MESSAGES, TOOL_RULES, UNLOCK_MS, createT1, parseToolCall } from './t1.js';
@@ -156,7 +156,8 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
   // Who is asking (ticket 38): the owner of everything a customer touches comes from the signed session id, never from the
   // raw token subject. Pseudonymous user id for the audit log and rate limits: the verified owner, else the guest's.
   const identity = createIdentity({ secret: sessionSecret, clock, ttlMs: sessionTtlMs });
-  const agencyTenantId = agencyProfile ? Object.keys(agencyProfile.tenants)[0] : null;
+  const agencyTenantIds = agencyProfile ? new Set(Object.keys(agencyProfile.tenants)) : null;
+  const agencyTenantFrom = (body) => typeof body?.tenant === 'string' && agencyTenantIds?.has(body.tenant) ? body.tenant : null;
   const pseudonym = (req) => { const who = identity.resolve(req); return who.owner ?? guestOwnerOf(tokenOf(req)); };
   const handoff = createHandoff({
     identity, database, clock, audit, failedQuestions, mailer, agents, support, consoleUrl, conversations, retentionMs: retention?.ms,
@@ -164,7 +165,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     // Suggested replies take the metered path: counted as requests and tokens, and not run once a global budget is used up.
     suggestions: { model, meter: (m) => limiter.meter(m), budgetHit: () => limiter.budgetHit(), checkOutput },
     recordsFor: async ({ conversation, req, tenant }) => (!agencyProfile && t1 && req ? t1.recentMasked(conversation, tokenOf(req), await entitlementsFor(req, tenant, conversation)) : null),
-    tenantId: agencyTenantId,
+    tenantId: null,
     agencyProfile,
   });
 
@@ -208,11 +209,12 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     const reply = (status, payload) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(payload));
     let body;
     try { body = await readJson(req); } catch { reply(400, { error: 'bad_request' }); return; }
-    if (agencyProfile) body.tenant = agencyTenantId;
     if (agencyProfile) {
       const token = tokenOf(req);
       if (!token) { reply(401, { error: 'session_expired' }); return; }
-      const tenant = agencyTenantId;
+      if (typeof body?.tenant === 'string' && !agencyTenantIds.has(body.tenant)) { reply(403, { error: 'unknown_tenant' }); return; }
+      const tenant = agencyTenantFrom(body) ?? agencyProfile.defaultTenant ?? (agencyTenantIds.size === 1 ? [...agencyTenantIds][0] : null);
+      if (!tenant) { reply(400, { error: 'tenant_required' }); return; }
       let accepted;
       try {
         accepted = await gateway.request({ tenant, token, method: 'GET', path: '/transactions/history/teller', query: { page: 0, limit: 100000 } });
@@ -225,7 +227,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
       if (!Array.isArray(scopedRows)) { reply(502, { error: 'unavailable' }); return; }
       const owner = ownerOf(token);
       const known = typeof body?.conversationId === 'string' ? conversations.get(body.conversationId) : undefined;
-      if (known && known.owner !== owner && known.owner !== guestOwnerOf(token)) { reply(404, { error: 'not_found' }); return; }
+      if (known && (known.owner !== owner && known.owner !== guestOwnerOf(token) || known.session?.tenant && known.session.tenant !== tenant)) { reply(404, { error: 'not_found' }); return; }
       const conversationId = known ? body.conversationId : randomUUID();
       const conversation = known ?? { owner, history: [], language: 'en', asked: new Set(), feedback: [], session: null };
       conversation.owner = owner;
@@ -371,7 +373,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
       airtime: { en: 'Get help buying airtime', fr: 'Obtenir de l’aide pour acheter du crédit téléphonique' },
       request_to_pay: { en: 'Get help with payment requests', fr: 'Obtenir de l’aide sur les demandes de paiement' },
     };
-    const context = !agencyProfile && route ? {
+    const context = route ? {
       label: route[1].labels[lang] ?? route[1].labels.en,
       description: contextGuides.length
         ? contextDescriptions[route[0]]?.[lang] ?? (lang === 'fr' ? 'Consulter les conseils pour cette page' : 'See guidance for this page')
@@ -443,7 +445,6 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
   async function handleChat(req, res) {
     let body;
     try { body = await readJson(req); } catch { res.writeHead(400).end(); return; }
-    if (agencyProfile) body.tenant = agencyTenantId;
     if (typeof body?.message !== 'string' || !body.message.trim()) { res.writeHead(400).end(); return; }
 
     // Everything past this point sees only the redacted text; the raw message is never stored.
@@ -471,8 +472,8 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     if (turnKey && replayTurn(turnKey, res)) return;
     const conversationId = known ? body.conversationId : randomUUID();
     const conversation = known ?? { owner, history: [], language: 'en', asked: new Set(), session: null };
-    if (agencyProfile && conversation.session?.teller !== true) { sessionExpired(res); return; }
-    if (agencyProfile) body.tenant = agencyTenantId;
+    if (agencyProfile && (conversation.session?.teller !== true || body.tenant && body.tenant !== conversation.session.tenant)) { sessionExpired(res); return; }
+    if (agencyProfile) body.tenant = conversation.session.tenant;
     if (turnKey) recordTurn(turnKey, res);
     conversation.lastActiveAt = clock.now();
     const language = detectLanguage(body.message, conversation.language);
@@ -593,7 +594,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
           // A valid tag. The model sometimes writes Overview for everything, so unless the customer asked to be taken
           // somewhere, the page the guide itself is about wins over a different page, and Overview is only linked when
           // it was asked for.
-          const guidePage = navigate.guideRoutes?.map((r) => routeIdForPath(navigation, r)).find(Boolean) ?? null;
+          const guidePage = navigate.guideNavigation?.find(Boolean) ?? navigate.guideRoutes?.map((r) => routeIdForPath(navigation, r)).find(Boolean) ?? null;
           let swap = null;
           if (!isNavigationAsk(message)) {
             if (guidePage && navigated.proposal !== guidePage) swap = guidePage;
@@ -617,7 +618,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
       // The model did not add a link, or its link was dropped: the page the guide itself is about gets one, so the
       // link never depends on the model remembering a tag.
       if (navigate && !card && !parsed.category && !refusal && navigate.guideRoutes?.length && !checkedProposal) {
-        const id = navigate.guideRoutes.map((r) => routeIdForPath(navigation, r)).find(Boolean);
+        const id = navigate.guideNavigation?.find(Boolean) ?? navigate.guideRoutes.map((r) => routeIdForPath(navigation, r)).find(Boolean);
         const checked = id ? validateProposal(navigation, id, language, navigate.entitlements) : null;
         if (checked?.ok) {
           card = checked.card;
@@ -773,11 +774,13 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
             ? { picks: [], refusal: null }
             : selected
               ? { picks: [selected.id], refusal: null }
-              : await routeGuides({ model: turnModel, language, available, guides, history, tools: t1 && !agencyProfile ? TOOL_RULES : '', page: agencyProfile ? null : page });
+              : agencyProfile
+                ? agencyCashWorkflowIntent(message, available) ?? await routeGuides({ model: turnModel, language, available, guides, history, tools: '', page })
+                : await routeGuides({ model: turnModel, language, available, guides, history, tools: t1 && !agencyProfile ? TOOL_RULES : '', page });
         // Common account-transfer and vague help phrasing was model-routed inconsistently.
         // Resolve it after the model has had a chance to refuse unsafe asks.
         if (!agencyUnsafeRequest && !transferTool && !transferReply && !selected && routed.refusal === 'execute' && !asksToComplete(message)) {
-          routed = await routeGuides({ model: turnModel, language, available, guides, history, tools: t1 && !agencyProfile ? TOOL_RULES : '', retry: true, page: agencyProfile ? null : page });
+          routed = await routeGuides({ model: turnModel, language, available, guides, history, tools: t1 && !agencyProfile ? TOOL_RULES : '', retry: true, page });
         }
         if (!agencyUnsafeRequest && !transferTool && !transferReply && !selected && !routed.tool && (!routed.refusal || routed.refusal === 'execute' && !asksToComplete(message))) {
           routed = transferGuideIntent(message, available) ?? routed;
@@ -798,12 +801,26 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
         const { picks } = routed;
         refusal = routed.refusal;
         if (askClarification) {
-          const question = language === 'fr' ? 'Vous cherchez des informations sur quel sujet ?' : 'What would you like help with?';
-          const options = conversation.pendingClarification.guideIds
+          const ids = conversation.pendingClarification.guideIds;
+          const options = ids
             .map((id) => available.find((guide) => guide.id === id))
             .filter(Boolean)
             .map((guide) => guide[language].title);
-          reply = question;
+          const question = routed.agencyCashClarification
+            ? language === 'fr'
+              ? `Le portail propose deux parcours de cash-${routed.agencyCashClarification === 'cashin' ? 'in' : 'out'} :\n• Privé/interne : le parcours local BICEC.\n• GIMAC : le parcours GIMAC (CEMAC).\nChoisissez le parcours prévu pour la destination de la transaction. En cas de doute, vérifiez la procédure bancaire ou demandez au support agence habilité. Quel parcours utilisez-vous ?`
+              : `The portal has two cash-${routed.agencyCashClarification === 'cashin' ? 'in' : 'out'} routes:\n• Private/Internal: the local BICEC route.\n• GIMAC: the GIMAC (CEMAC) route.\nChoose the route specified for the transaction’s destination. If you’re unsure, check the bank procedure or ask authorized agency support. Which route are you handling?`
+            : language === 'fr' ? 'Vous cherchez des informations sur quel sujet ?' : 'What would you like help with?';
+          if (routed.agencyCashClarification) {
+            reply += question;
+            send(res, 'delta', { text: question });
+            for (const id of ids) {
+              const guide = available.find((item) => item.id === id);
+              const card = guide?.navigation ? validateProposal(navigation, guide.navigation, language, ent) : null;
+              if (card?.ok) send(res, 'action_card', card.card);
+            }
+          }
+          reply += routed.agencyCashClarification ? '' : question;
           send(res, 'guides', { guides: [] });
           send(res, 'clarification', { question, options });
         } else if (agencySafetyReply) {
@@ -884,7 +901,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
         } else {
           const used = picks.filter((id) => id !== UNSUPPORTED_ID).map((id) => guides.get(id));
           guideIds = used.map((g) => g.id);
-          send(res, 'guides', { guides: used.map((g) => ({ id: g.id, title: g[language].title })) });
+          send(res, 'guides', { guides: agencyProfile ? [] : used.map((g) => ({ id: g.id, title: g[language].title })) });
           if (picks.length === 0 && routed.commonGuidance && !refusal) {
             guideIds = routed.commonGuideIds;
             send(res, 'guides', { guides: routed.commonGuideIds.map((id) => guides.get(id)).filter(Boolean).map((guide) => ({ id: guide.id, title: guide[language].title })) });
@@ -900,13 +917,20 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
             await failedTrail?.append({ time: new Date(clock.now()).toISOString(), conversationId, tenant: body.tenant ?? null, language, question: message });
           } else {
             const material = picks.map((id) => guides.get(id)?.[language] ?? null).filter(Boolean);
+          const answerMaterial = agencyProfile ? material.map((guide) => {
+            const closing = guide.closing;
+            if (!closing) return guide;
+            const heading = `\n## ${closing.heading}`;
+            const at = guide.text.lastIndexOf(heading);
+            return at < 0 ? guide : { ...guide, text: guide.text.slice(0, at).trimEnd() };
+          }) : material;
             // An answer from the unsupported list has no task page: the model is offered no links and none can be drawn.
             const linkable = navigation && used.length > 0 && page?.surface !== 'my-cases';
-            await answer(answerMessages(material, picks.includes(UNSUPPORTED_ID) ? guides.unsupported : '', history, linkable ? offeredPages(navigation, language, ent) : [], page), {
-              navigate: linkable ? { fallback: stepsOf(material[0]?.text ?? ''), entitlements: ent, guided: used.length > 0, guideRoutes: used.map((g) => g.route).filter(Boolean) } : null,
+          await answer(answerMessages(answerMaterial, picks.includes(UNSUPPORTED_ID) ? guides.unsupported : '', history, linkable ? offeredPages(navigation, language, ent) : [], page), {
+              navigate: linkable ? { fallback: stepsOf(material[0]?.text ?? ''), entitlements: ent, guided: used.length > 0, guideRoutes: used.map((g) => g.route).filter(Boolean), guideNavigation: used.map((g) => g.navigation).filter(Boolean) } : null,
             });
             const closing = used.find((g) => g[language].closing)?.[language].closing;
-            if (!refusal && !filtered) {
+          if (!agencyProfile && !refusal && !filtered) {
               const text = closing ? `\n\n${closing.heading}${language === 'fr' ? ' :' : ':'} ${closing.body}` : `\n\n${GENERIC_CLOSING[language]}`;
               reply += text;
               send(res, 'delta', { text });
@@ -962,7 +986,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
 
   handoff.resume(); // timers of the cases loaded from the database
 
-  const drafts = createDrafts({ identity, t1, entitlementsFor, conversations, handoff, supportAddress: support?.mail?.supportAddress, mailer, clock, audit, agencyProfile, tenantId: agencyTenantId });
+  const drafts = createDrafts({ identity, t1, entitlementsFor, conversations, handoff, supportAddress: support?.mail?.supportAddress, mailer, clock, audit, agencyProfile });
 
   const server = http.createServer((req, res) => {
     const fail = () => { if (!res.headersSent) res.writeHead(500); res.end(); };

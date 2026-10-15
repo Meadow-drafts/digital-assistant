@@ -2,8 +2,9 @@
 // against the route config and the widget draws the card from what this module returns, never from model text.
 import { readFileSync } from 'node:fs';
 
-// Whatever the config says, these never become cards: approvals, PIN and password change, settings (where both
-// live), and anything carrying a record id (a ":param" or a digit-only segment) or leaving the portal.
+// These never become cards: PIN/password changes, settings, and anything carrying a record id (a ":param" or a
+// digit-only segment) or leaving the portal. Approval actions stay out of scope; an explicitly configured review-page
+// link may open the teller's validations page without approving anything.
 const FORBIDDEN = /^\/(validations|settings)(\/|$)|pin|password/i;
 const PLAIN_PATH = /^\/[a-z0-9\-/]*$/i;
 
@@ -11,7 +12,8 @@ function checkRoute(id, route) {
   const fail = (why) => { throw new Error(`navigate config: ${id}: ${why}`); };
   if (typeof route?.path !== 'string' || !PLAIN_PATH.test(route.path)) fail('path must be a plain portal path');
   if (route.path.startsWith('//')) fail('path must stay in the portal');
-  if (FORBIDDEN.test(route.path)) fail('this page is never linked');
+  const validationReview = route.path === '/validations' && route.navigationPurpose === 'review';
+  if (FORBIDDEN.test(route.path) && !validationReview) fail('this page is never linked');
   if (route.path.split('/').some((segment) => /^\d+$/.test(segment))) fail('a path with a record id is never linked');
   if (!route.labels?.en || !route.labels?.fr) fail('labels are needed in English and French');
   if (route.cta !== undefined && !(route.cta?.en && route.cta?.fr)) fail('cta needs text in English and French');

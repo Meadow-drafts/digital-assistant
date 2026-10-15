@@ -7,28 +7,48 @@ import { createFakeModel } from './harness/fake-model.js';
 import { makeToken } from './harness/token.js';
 import { openWidget } from './harness/open-widget.js';
 import { loadGuides } from '../src/guides.js';
+import { loadNavigation } from '../src/navigate.js';
+import { loadSupport } from '../src/support.js';
 
-test('the BICEC agency profile is a single tenant with its own agency API prefix and stores', () => {
+test('the agency deployment selects one tenant with separate storage and support but shared guides', () => {
   const profile = loadAgencyProfile(new URL('../config/agency-bicec/profile.json', import.meta.url));
-  assert.equal(profile.id, 'bicec-agency');
+  assert.equal(profile.id, 'agency-banking');
+  assert.equal(profile.defaultTenant, 'bicec-agency');
   assert.deepEqual(profile.tenants, {
-    'bicec-agency': { baseUrl: 'https://agency-gateway.example.invalid', apiPrefix: '/agencybank' },
+    'bicec-agency': { baseUrl: 'https://m.bipay-test.bicec.com', apiPrefix: '/agencybank' },
   });
   assert.equal(profile.dataDirectory, 'data/agency-bicec');
+  assert.equal(profile.supportConfig, 'config/agency-bicec/support.json');
   assert.equal(profile.guidesDirectory, 'guides-agency-bicec');
+  const iwomi = loadAgencyProfile(new URL('../config/agency-bicec/profile.json', import.meta.url), { tenantId: 'iwomi-agency' });
+  assert.deepEqual(iwomi.tenants, {
+    'iwomi-agency': { baseUrl: 'http://148.113.191.174:8765', apiPrefix: '/agencybank' },
+  });
+  assert.equal(iwomi.dataDirectory, 'data/agency-iwomi');
+  assert.equal(iwomi.supportConfig, 'config/agency-iwomi/support.json');
+  assert.equal(iwomi.guidesDirectory, profile.guidesDirectory);
+  const bicecSupport = loadSupport(new URL(`../${profile.supportConfig}`, import.meta.url));
+  const iwomiSupport = loadSupport(new URL(`../${iwomi.supportConfig}`, import.meta.url));
+  assert.notEqual(bicecSupport.agents.list[0].id, iwomiSupport.agents.list[0].id);
 });
 
-test('an agency profile cannot accidentally configure multiple tenants or consumer APIs', () => {
-  assert.throws(() => loadAgencyProfile({
-    id: 'bicec-agency',
-    tenants: { one: { baseUrl: 'https://one.example', apiPrefix: '/agencybank' }, two: { baseUrl: 'https://two.example', apiPrefix: '/mosa' } },
-    dataDirectory: 'data/agency-bicec', guidesDirectory: 'guides-agency-bicec',
-  }), /exactly one tenant/);
+test('agency profiles reject consumer API prefixes and overrides outside the allowlist', () => {
   assert.throws(() => loadAgencyProfile({
     id: 'bicec-agency',
     tenants: { 'bicec-agency': { baseUrl: 'https://one.example', apiPrefix: '/digitalbank' } },
     dataDirectory: 'data/agency-bicec', guidesDirectory: 'guides-agency-bicec',
   }), /agency API prefix/);
+  assert.throws(() => loadAgencyProfile(new URL('../config/agency-bicec/profile.json', import.meta.url), {
+    tenantOverrides: { 'unknown-bank': 'https://gateway.example' },
+  }), /unknown agency tenant/);
+  assert.throws(() => loadAgencyProfile(new URL('../config/agency-bicec/profile.json', import.meta.url), {
+    tenantId: 'unknown-bank',
+  }), /ASSISTANT_TENANT_ID/);
+  const overridden = loadAgencyProfile(new URL('../config/agency-bicec/profile.json', import.meta.url), {
+    tenantId: 'iwomi-agency',
+    tenantOverrides: { 'iwomi-agency': 'https://iwomi-gateway.example' },
+  });
+  assert.equal(overridden.tenants['iwomi-agency'].baseUrl, 'https://iwomi-gateway.example');
 });
 
 test('a teller session requires the host bearer token and never calls consumer-wallet verification', async (t) => {
@@ -42,10 +62,42 @@ test('a teller session requires the host bearer token and never calls consumer-w
     method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${makeToken('teller-17')}` },
     body: JSON.stringify({ tenant: 'other-bank', cli: 'client-identifier' }),
   });
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 403);
+  const accepted = await fetch(`${svc.baseUrl}/session`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${makeToken('teller-17')}` },
+    body: JSON.stringify({ tenant: 'bicec-agency', cli: 'client-identifier' }),
+  });
+  assert.equal(accepted.status, 200);
+  const session = await accepted.json();
   assert.deepEqual(gateway.calls.map(({ path, query }) => ({ path, query })), [
     { path: '/transactions/history/teller', query: { page: 0, limit: 100000 } },
-  ], 'session verification uses the signed-in teller history surface, not consumer identity or /digitalbank');
+  ], 'the selected agency tenant uses the signed-in teller history surface, not consumer identity or /digitalbank');
+  assert.equal(gateway.calls[0].tenant, 'bicec-agency');
+  const switched = await fetch(`${svc.baseUrl}/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${makeToken('teller-17')}`, 'x-assistant-session': session.sessionId },
+    body: JSON.stringify({ conversationId: session.conversationId, tenant: 'iwomi-agency', message: 'Hello' }),
+  });
+  assert.equal(switched.status, 401, 'a conversation cannot switch to a different allowlisted tenant');
+  assert.equal(gateway.calls.length, 1);
+});
+
+test('an IWOMI assistant deployment can call only the IWOMI agency gateway', async (t) => {
+  const profile = loadAgencyProfile(new URL('../config/agency-bicec/profile.json', import.meta.url), { tenantId: 'iwomi-agency' });
+  const gateway = createFakeGateway({ 'GET /transactions/history/teller': { data: { content: [] } } });
+  const svc = await startService({ agencyProfile: profile, gateway });
+  t.after(svc.close);
+  const response = await fetch(`${svc.baseUrl}/session`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${makeToken('iwomi-teller')}` },
+    body: JSON.stringify({ tenant: 'bicec-agency' }),
+  });
+  assert.equal(response.status, 403);
+  const accepted = await fetch(`${svc.baseUrl}/session`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${makeToken('iwomi-teller')}` },
+    body: JSON.stringify({ tenant: 'iwomi-agency' }),
+  });
+  assert.equal(accepted.status, 200);
+  assert.equal(gateway.calls.length, 1);
+  assert.equal(gateway.calls[0].tenant, 'iwomi-agency');
 });
 
 test('agency session is not established when the backend response lacks the scoped history page shape', async (t) => {
@@ -91,37 +143,63 @@ test('agency requests to execute teller actions or use authentication secrets ge
   widget.dom.window.close();
 });
 
-test('approved agency guides appear as generic topics while route hints never produce contextual help or links', async (t) => {
+test('a signed-in BICEC teller sees page-specific approved guidance from the fixed workflow allowlist', async (t) => {
   const profile = loadAgencyProfile(new URL('../config/agency-bicec/profile.json', import.meta.url));
   const gateway = createFakeGateway({ 'GET /transactions/history/teller': { data: { content: [] } } });
-  const svc = await startService({ agencyProfile: profile, gateway, model: createFakeModel(['generic help']), guides: loadGuides(new URL('../guides-agency-bicec/', import.meta.url)) });
+  const svc = await startService({ agencyProfile: profile, gateway, model: createFakeModel(['generic help']), guides: loadGuides(new URL('../guides-agency-bicec/', import.meta.url)), navigation: loadNavigation(new URL('../config/agency-bicec/navigate-routes.json', import.meta.url)) });
   t.after(svc.close);
   const token = makeToken('teller-context');
-  const started = await fetch(`${svc.baseUrl}/session`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ tenant: 'untrusted-tenant' }) });
+  const started = await fetch(`${svc.baseUrl}/session`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ tenant: 'bicec-agency' }) });
   const session = await started.json();
   const topicsResponse = await fetch(`${svc.baseUrl}/help/topics?language=en&path=%2Fprivate&conversationId=${session.conversationId}`, {
     headers: { authorization: `Bearer ${token}`, 'x-assistant-session': session.sessionId },
   });
   const topics = await topicsResponse.json();
-  assert.equal(topics.topics.length, 15);
+  assert.equal(topics.topics.length, 17);
   assert.equal(topics.topics[0].key, '00-cash-in');
-  assert.equal(topics.context, null);
+  assert.equal(topics.context.label, 'Private Cash-in (Internal)');
+  assert.deepEqual(topics.context.topics.map((topic) => topic.key), ['02-private-cashin', '03-private-cashout']);
   assert.equal(topics.topics.some((topic) => /DRAFT|BROUILLON/i.test(topic.title)), false);
   assert.equal(gateway.calls[0].tenant, 'bicec-agency', 'the client route/tenant hint never selects a gateway tenant');
+  const unlisted = await fetch(`${svc.baseUrl}/help/topics?language=en&path=%2Fpretend-route&conversationId=${session.conversationId}`, {
+    headers: { authorization: `Bearer ${token}`, 'x-assistant-session': session.sessionId },
+  });
+  assert.equal((await unlisted.json()).context, null, 'an arbitrary host path does not create a workflow or grant access');
 });
 
-test('agency widget refreshes its hint after a portal route change without exposing page-specific help', async (t) => {
+test('a teller can open an allowlisted workflow link, and arbitrary host paths do not create links', async (t) => {
   const profile = loadAgencyProfile(new URL('../config/agency-bicec/profile.json', import.meta.url));
   const gateway = createFakeGateway({ 'GET /transactions/history/teller': { data: { content: [] } } });
-  const svc = await startService({ agencyProfile: profile, gateway, model: createFakeModel(['generic help']), guides: loadGuides(new URL('../guides-agency-bicec/', import.meta.url)) });
+  const navigation = loadNavigation(new URL('../config/agency-bicec/navigate-routes.json', import.meta.url));
+  const svc = await startService({ agencyProfile: profile, gateway, navigation, guides: loadGuides(new URL('../guides-agency-bicec/', import.meta.url)), model: createFakeModel(['[[navigate:private_cashin]]Open Private Cash-in.']) });
+  t.after(svc.close);
+  const token = makeToken('teller-workflow-link');
+  const sessionResponse = await fetch(`${svc.baseUrl}/session`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: '{}' });
+  const session = await sessionResponse.json();
+  const response = await fetch(`${svc.baseUrl}/chat`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'x-assistant-session': session.sessionId, 'content-type': 'application/json' },
+    body: JSON.stringify({ conversationId: session.conversationId, message: 'Explain private cash services', guideKey: '02-private-cashin', language: 'en' }),
+  });
+  const body = await response.text();
+  assert.match(body, /event: action_card/);
+  assert.match(body, /"path":"\/private"/);
+  assert.equal(gateway.calls.every((call) => call.tenant === 'bicec-agency'), true);
+});
+
+test('agency widget refreshes its hint after a portal route change and shows allowlisted page-specific help', async (t) => {
+  const profile = loadAgencyProfile(new URL('../config/agency-bicec/profile.json', import.meta.url));
+  const gateway = createFakeGateway({ 'GET /transactions/history/teller': { data: { content: [] } } });
+  const svc = await startService({ agencyProfile: profile, gateway, model: createFakeModel(['generic help']), guides: loadGuides(new URL('../guides-agency-bicec/', import.meta.url)), navigation: loadNavigation(new URL('../config/agency-bicec/navigate-routes.json', import.meta.url)) });
   t.after(svc.close);
   const widget = await openWidget(svc.baseUrl, '/', { attrs: `tenant="bicec-agency" data-mode="agency" token="${makeToken('teller-route')}"` });
   await widget.until(() => widget.net.topicRequests.length >= 1);
   widget.dom.window.history.pushState({}, '', '/private');
   widget.dom.window.dispatchEvent(new widget.dom.window.PopStateEvent('popstate'));
   await widget.until(() => widget.net.topicRequests.length >= 2);
+  await widget.until(() => widget.q('context-card').hidden === false);
   assert.match(widget.net.topicRequests.at(-1), /path=%2Fprivate/);
-  assert.equal(widget.q('context-card').hidden, true);
+  assert.equal(widget.q('context-card').hidden, false);
   const replacementToken = makeToken('teller-route-new-session');
   const agencyWidget = widget.document.querySelector('bank-assistant');
   agencyWidget.getToken = () => replacementToken;

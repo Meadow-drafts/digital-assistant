@@ -1,0 +1,130 @@
+{
+  "_note": "Fixed BICEC teller workflow routes. These links are available to every authenticated teller under the backend team's common-access rule. Host page paths may select context only when they exactly match this list; they do not grant access.",
+  "button": {
+    "en": "Open workflow",
+    "fr": "Ouvrir le workflow"
+  },
+  "routes": {
+    "private_cashin": {
+      "path": "/private",
+      "labels": {
+        "en": "Private Cash-in (Internal)",
+        "fr": "Cash-in privé (interne)"
+      },
+      "cta": { "en": "Open Private Cash-in", "fr": "Ouvrir le cash-in privé" }
+    },
+    "private_cashout": {
+      "path": "/private",
+      "labels": {
+        "en": "Private Cash-out (Internal)",
+        "fr": "Cash-out privé (interne)"
+      },
+      "cta": { "en": "Open Private Cash-out", "fr": "Ouvrir le cash-out privé" }
+    },
+    "gimac_cashin": {
+      "path": "/external",
+      "labels": { "en": "GIMAC Cash-in", "fr": "Cash-in GIMAC" },
+      "cta": { "en": "Open GIMAC Cash-in", "fr": "Ouvrir le cash-in GIMAC" }
+    },
+    "gimac_cashout": {
+      "path": "/external",
+      "labels": { "en": "GIMAC Cash-out", "fr": "Cash-out GIMAC" },
+      "cta": { "en": "Open GIMAC Cash-out", "fr": "Ouvrir le cash-out GIMAC" }
+    },
+    "voucher_generation": {
+      "path": "/vouchers",
+      "labels": {
+        "en": "Generate Voucher Code",
+        "fr": "Générer un code voucher"
+      },
+      "cta": {
+        "en": "Open voucher generation",
+        "fr": "Ouvrir la génération de voucher"
+      }
+    },
+    "voucher_cancellation": {
+      "path": "/vouchers",
+      "labels": {
+        "en": "Cancel Voucher Code",
+        "fr": "Annuler un code voucher"
+      },
+      "cta": {
+        "en": "Open voucher management",
+        "fr": "Ouvrir la gestion des vouchers"
+      }
+    },
+    "cardless_withdrawal": {
+      "path": "/vouchers/cardless-withdrawal",
+      "labels": { "en": "Cardless Withdrawal", "fr": "Retrait sans carte" },
+      "cta": {
+        "en": "Open Cardless Withdrawal",
+        "fr": "Ouvrir le retrait sans carte"
+      }
+    },
+    "merchant_payment_voucher": {
+      "path": "/vouchers/merchant-payment",
+      "labels": {
+        "en": "Merchant Payment Voucher",
+        "fr": "Voucher Paiement Marchand"
+      },
+      "cta": {
+        "en": "Open Merchant Payment Voucher",
+        "fr": "Ouvrir le voucher paiement marchand"
+      }
+    },
+    "incoming_remittance": {
+      "path": "/remittance",
+      "labels": { "en": "Incoming Remittance", "fr": "Réception de transfert" },
+      "cta": { "en": "Open Remittance", "fr": "Ouvrir les transferts" }
+    },
+    "outgoing_remittance": {
+      "path": "/remittance",
+      "labels": { "en": "Outgoing Remittance", "fr": "Envoi sortant" },
+      "cta": { "en": "Open Remittance", "fr": "Ouvrir les transferts" }
+    },
+    "bill_payment": {
+      "path": "/agency-payments",
+      "labels": { "en": "Bill Payment", "fr": "Paiement de facture" },
+      "cta": {
+        "en": "Open Bill Payment",
+        "fr": "Ouvrir le paiement de facture"
+      }
+    },
+    "airtime": {
+      "path": "/agency-payments/airtime-services",
+      "labels": { "en": "Airtime Topup", "fr": "Recharge de crédit" },
+      "cta": {
+        "en": "Open Airtime Topup",
+        "fr": "Ouvrir la recharge de crédit"
+      }
+    },
+    "internet": {
+      "path": "/agency-payments/internet-services",
+      "labels": { "en": "Internet Topup", "fr": "Recharge Internet" },
+      "cta": {
+        "en": "Open Internet Topup",
+        "fr": "Ouvrir la recharge Internet"
+      }
+    },
+    "merchant_services": {
+      "path": "/merchants",
+      "labels": { "en": "Merchant Payments", "fr": "Paiements marchands" },
+      "cta": {
+        "en": "Open Merchant Payments",
+        "fr": "Ouvrir les paiements marchands"
+      }
+    },
+    "validations": {
+      "path": "/validations",
+      "navigationPurpose": "review",
+      "labels": {
+        "en": "My Pending Validations",
+        "fr": "Mes validations en attente"
+      },
+      "cta": {
+        "en": "Open pending validations",
+        "fr": "Ouvrir les validations en attente"
+      }
+    }
+  }
+}

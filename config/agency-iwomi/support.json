@@ -1,0 +1,22 @@
+{
+  "_note": "IWOMI agency support configuration. Replace the placeholder identity, password, mail sender, support address, and schedule before enabling staff access.",
+  "agents": {
+    "list": [
+      { "id": "iwomi-agency-demo", "name": "IWOMI agency support placeholder", "email": "iwomi-agency-support@example.test", "password": "change-me-iwomi-agency" }
+    ],
+    "onCall": ["iwomi-agency-demo"],
+    "auditReaders": ["iwomi-agency-demo"],
+    "sessionMs": 28800000
+  },
+  "timers": {
+    "broadcastMs": 300000,
+    "queuedNoticeMs": 900000,
+    "absentMs": 120000,
+    "agentSilenceMs": 600000,
+    "agentFollowUpMs": 1800000,
+    "autoResolveMs": 86400000,
+    "reopenWindowMs": 259200000
+  },
+  "hours": { "utcOffsetMinutes": 60, "days": [1, 2, 3, 4, 5], "open": "08:00", "close": "17:00" },
+  "mail": { "mode": "log", "from": "iwomi-agency-support@example.test", "supportAddress": "iwomi-agency-support@example.test", "smtp": { "host": "localhost", "port": 1025, "secure": false, "user": null, "password": null } }
+}

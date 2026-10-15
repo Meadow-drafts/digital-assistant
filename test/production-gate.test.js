@@ -83,6 +83,13 @@ for (const [what, url] of [['the test server', 'https://m.bipay-test.bicec.com']
   });
 }
 
+test('production refuses an agency gateway that forwards teller tokens over HTTP', () => {
+  assert.throws(
+    () => start({ tenants: { iwomi: { baseUrl: 'http://gateway.iwomi.example', apiPrefix: '/agencybank' } } }),
+    (err) => err instanceof StartupError && /HTTPS gateway origins/i.test(err.message) && /iwomi/.test(err.message),
+  );
+});
+
 test('a hashed agent password logs in; the wrong password does not; the hash is not accepted as the password', async (t) => {
   const hash = hashPassword('a-long-real-secret-1');
   assert.notEqual(hash, hashPassword('a-long-real-secret-1'), 'each hash has its own salt');

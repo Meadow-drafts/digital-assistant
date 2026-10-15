@@ -296,7 +296,7 @@ export function createHandoff({ identity, database, clock, audit, failedQuestion
     const open = store.latestFor(conversationId);
     if (open && (open.state === 'waiting' || open.state === 'with_agent')) { json(res, 200, { conversationId, ...view(open) }); return; }
     if (reopenable(open)) { await reopen(open); json(res, 200, { conversationId, ...view(open) }); return; }
-    const tenant = tenantId ?? (typeof body?.tenant === 'string' ? body.tenant.slice(0, 40) : conversation.session?.tenant ?? null);
+    const tenant = tenantId ?? (agencyProfile ? conversation.session?.tenant ?? null : typeof body?.tenant === 'string' ? body.tenant.slice(0, 40) : conversation.session?.tenant ?? null);
     const c = await startCase({ conversationId, conversation, owner, tenant, req });
     json(res, 200, { conversationId, ...view(c) });
   }

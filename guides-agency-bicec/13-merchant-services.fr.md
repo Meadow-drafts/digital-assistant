@@ -5,18 +5,25 @@ verified-on: 2026-10-15
 ---
 # Services marchands
 
-**Guide guichet approuvé par la banque.** Les libellés du workflow sont repris tels qu’ils apparaissent dans le portail du guichet connecté.
+## Quand l’utiliser
+Un client a besoin d’aide pour trouver les services de paiement marchand du portail agence.
 
 ## Étapes
+1. Ouvrez la page **Paiements marchands** depuis le portail ou le lien des services marchands.
+2. Sélectionnez l’onglet **Dépôt en espèces** ou **Retrait en espèces** selon la demande du client.
+3. Pour un dépôt, sélectionnez le pays, le type de transfert (**Compte** ou **Wallet**) et l’opérateur dans le parcours. Remplissez l’étape **Informations de l’expéditeur**, sélectionnez le compte à débiter, saisissez le compte/wallet de destination, le montant et le motif, puis cliquez sur **Dépôt en espèces**.
+4. Pour un retrait, saisissez le code voucher et le montant, puis cliquez sur **Retrait en espèces** pour consulter le voucher.
+5. Vérifiez les détails de la transaction et les frais. Si **Inventaire des dénominations de cash** s’affiche, saisissez le nombre de billets et de pièces reçus par dénomination, comparez le total au montant cible, saisissez le montant collecté, puis cliquez sur **Confirmer et déposer**.
+6. Saisissez le code PIN de transaction dans le portail et l’OTP dans le portail s’il est demandé. Attendez le résultat avant de remettre des espèces ou de commencer une autre opération.
 
-1. Dans le portail agence, utilisez la section **Paiements marchands** et recherchez **Paiements marchands**. Cet assistant ne fournit pas de lien vers une page, car l’accès au workflow n’a pas encore été vérifié par une source faisant autorité.
-2. Lisez les instructions et les champs affichés dans votre portail connecté. Demandez au support agence habilité si une page ou un champ n’est pas clair.
-3. Vous restez responsable de toute action de guichet. L’assistant ne remplit ni ne soumet de formulaire, n’exécute aucune transaction et n’approuve aucune validation.
+## Erreurs fréquentes
+- Le mauvais onglet est ouvert : arrêtez-vous et sélectionnez **Dépôt en espèces** ou **Retrait en espèces** selon la demande du client.
+- Un champ est manquant, désactivé ou refusé : lisez le message du portail et vérifiez l’information concernée. N’inventez pas de valeur ; si le message n’explique pas quoi faire, contactez le support agence habilité.
+- Le résultat n’est pas clair ou ne s’affiche pas : ne répétez pas l’action. Vérifiez son statut dans le portail ou demandez au support agence habilité.
 
-Les frais, plafonds, critères d’éligibilité, corridors et exceptions ne sont pas vérifiés ici. Consultez une source bancaire faisant autorité ou contactez le support agence habilité.
+Ce guide ne précise pas les frais, plafonds, critères d’éligibilité, corridors ou exceptions. Consultez une source bancaire approuvée pour ces informations.
 
-L’assistant ne demande jamais votre PIN ou OTP.
+L’assistant ne demande jamais votre PIN, OTP ou autre secret d’authentification. Ne le partagez pas dans le chat.
 
-## Contacter un agent
-
-Utilisez l’option Agent humain si ce brouillon ne répond pas à votre question. Relisez et modifiez le résumé du dossier avant le transfert.
+## Parlez à un agent si
+Le portail n’explique pas la prochaine étape, le statut reste incertain ou le client a besoin d’aide au-delà de ce guide. Utilisez l’option Agent humain, puis relisez et modifiez le résumé du dossier avant le transfert.

@@ -27,6 +27,28 @@ export function transferGuideIntent(text, available) {
   return null;
 }
 
+// BICEC agency workflows have two distinct cash-in and cash-out paths. Keep
+// this deterministic so the generic word never gets guessed by model routing.
+export function agencyCashWorkflowIntent(text, available) {
+  if (typeof text !== 'string' || asksToComplete(text)) return null;
+  const t = norm(text);
+  const cashIn = /\b(cash ?in|cashin|depot en especes|versement especes)\b/.test(t);
+  const cashOut = /\b(cash ?out|cashout|retrait d especes)\b/.test(t);
+  if (cashIn === cashOut) return null;
+  const action = cashIn ? 'cashin' : 'cashout';
+  const privateTarget = `private_${action}`;
+  const gimacTarget = `gimac_${action}`;
+  const privateGuide = available.find((guide) => guide.navigation === privateTarget);
+  const gimacGuide = available.find((guide) => guide.navigation === gimacTarget);
+  const privateMention = /\b(private|internal|interne|privee?|prive)\b/.test(t);
+  const gimacMention = /\bgimac\b/.test(t);
+  if (privateMention && !gimacMention && privateGuide) return { picks: [privateGuide.id], refusal: null };
+  if (gimacMention && !privateMention && gimacGuide) return { picks: [gimacGuide.id], refusal: null };
+  if (privateMention || gimacMention) return null;
+  const choices = [privateGuide?.id, gimacGuide?.id].filter(Boolean);
+  return choices.length === 2 ? { picks: [], refusal: null, clarification: choices, ambiguous: true, agencyCashClarification: action } : null;
+}
+
 const MAX_WORDS = 10;
 const OTHER_PERSON = /\b(colleague|collegue|friend|ami|amie|brother|frere|sister|soeur|wife|husband|mari|femme|mother|mere|father|pere|his|her|their|him|them|someone|quelqu un|marie|account number|numero de compte)\b|\w+ s (account|balance|solde)\b|\bde (ma|mon|mes|ta|ton|son|sa|ses|leur)\b|\d{5,}/;
 const FAILURE = /\b(fail|failed|declined|insufficient|error|refus\w*|why|echec|echoue\w*|insuffisant\w*|erreur|pourquoi|reject\w*|rejet\w*|deducted|debited|debite\w*)\b/;
