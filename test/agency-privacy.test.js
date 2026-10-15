@@ -20,7 +20,10 @@ test('agency model, failed-question and audit records do not retain a PIN or tra
   await widget.send('Can I cash in? reference TX-20481');
   await widget.until(() => svc.failedQuestions.records.length === 1);
   await widget.until(() => svc.audit.records.some((record) => record.outcome === 'ok' || record.outcome === 'no_guide'));
-  await widget.until(() => widget.qa('message').some((message) => message.dataset.from === 'assistant'));
+  await widget.until(() => {
+    const replies = widget.qa('message').filter((message) => message.dataset.from === 'assistant');
+    return replies.length === 2 && replies[1].dataset.answerId;
+  });
   const stored = JSON.stringify({ audit: svc.audit.records, failed: svc.failedQuestions.records, model: model.calls });
   assert.doesNotMatch(stored, /4821|TX-20481/);
   assert.match(stored, /\[REDACTED\]/);

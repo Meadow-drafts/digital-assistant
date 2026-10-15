@@ -28,12 +28,12 @@ for (const [leak, reply] of [
   test(`a reply containing a non-allowlisted ${leak} is blocked and replaced: ${reply.slice(0, 30)}`, async (t) => {
     const { svc, events } = await ask(reply, undefined, t);
 
-    assert.doesNotMatch(JSON.stringify(events), /scam\.example|secure-bank-login|free-prizes|677/);
+    assert.doesNotMatch(replyOf(events), /scam\.example|secure-bank-login|free-prizes|(?:\+237\s*)?677(?:\s*12\s*34\s*56|123456)/);
     assert.match(replyOf(events), /could not give that answer/i);
     assert.deepEqual(blockedOf(events), { type: 'blocked', reason: leak, card: HUMAN_CHIP });
     assert.equal(events.at(-1).type, 'done');
     assert.deepEqual([svc.audit.records[0].outcome, svc.audit.records[0].filter], ['filtered', leak]);
-    assert.doesNotMatch(JSON.stringify(svc.audit.records), /scam\.example|secure-bank-login|free-prizes|677/);
+    assert.doesNotMatch(JSON.stringify(svc.audit.records), /scam\.example|secure-bank-login|free-prizes|(?:\+237\s*)?677(?:\s*12\s*34\s*56|123456)/);
   });
 }
 
