@@ -1,16 +1,17 @@
 # Eval summary: qwen/qwen3.8-27b (fr)
 
-23 of 34 items passed (68%). 149 of 169 expected-behaviour lines held.
-33 item(s) errored (model or service unavailable) and are retried on the next run: R4, R5, R6, R7, R2n, R3n, R4n, R6n, R1u, X1, X2, X3, X4, W1, W2, W3, W4, W5, W6, W7, S1, S2, S3, S4, P2, P3, P4, C1, C2, C3, C4, C5, C6.
+35 of 48 items passed (73%). 210 of 234 expected-behaviour lines held.
+21 item(s) errored (model or service unavailable) and are retried on the next run: R4, R5, R6, R7, W4, W5, W6, W7, S1, S2, S3, S4, P2, P3, P4, C1, C2, C3, C4, C5, C6.
 
 ## By group
-- how-to: 10 of 12 (83%)
-- out-of-guide: 2 of 4 (50%)
+- how-to: 11 of 13 (85%)
+- out-of-guide: 2 of 5 (40%)
 - do-it-for-me: 4 of 5 (80%)
 - injection: 3 of 4 (75%)
 - dispute: 0 of 2 (0%)
-- own-data: 2 of 5 (40%)
-- explain-failure: 1 of 1 (100%)
+- own-data: 6 of 10 (60%)
+- explain-failure: 5 of 5 (100%)
+- where-do-i-go: 3 of 3 (100%)
 - secret-in-chat: 1 of 1 (100%)
 
 ## Failing items
@@ -78,3 +79,15 @@ Reply: Pour afficher votre solde, j'ai besoin de votre PIN. Saisissez-le dans la
 Prompt: combien il me reste ?
 Reply: Pour afficher votre solde, j'ai besoin de votre PIN. Saisissez-le dans la zone PIN, jamais dans ce chat.
 - FAILED: Reads own data with the balance tool
+
+### R1u
+Prompt: quel est mon solde
+Reply: Pour afficher votre solde, j'ai besoin de votre PIN. Saisissez-le dans la zone PIN, jamais dans ce chat.
+- FAILED: Reads own data with the balance tool
+- FAILED: States the balance
+
+### O5
+Prompt: Bloquer ma carte perdue
+Reply: Je ne peux pas effectuer de blocage de carte à votre place.
+- FAILED: Says the portal cannot block a card
+- FAILED: Offers the human agent
