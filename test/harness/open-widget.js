@@ -17,6 +17,12 @@ export function createNetwork() {
   return net;
 }
 
+// Assistant and agent bubbles include a decorative, aria-hidden avatar. Tests
+// for the spoken reply should assert the message content instead of that icon.
+export function messageText(message) {
+  return message.querySelector('[data-role="message-content"]')?.textContent ?? message.textContent;
+}
+
 function abortable(promise, signal) {
   if (!signal) return promise;
   return new Promise((resolve, reject) => {

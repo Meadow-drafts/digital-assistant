@@ -13,6 +13,7 @@ import { agentLogin } from './harness/cases.js';
 async function signedWidget(t, { gating = { usePackages: false }, path = '/', customerCatalogue = [], contextRoutes = {} } = {}) {
   const customer = alice();
   const guides = loadGuides(GUIDES);
+  for (const guide of guides.values()) guide.customerCatalogue = guide.id === 'my-cases';
   for (const key of customerCatalogue) guides.get(key).customerCatalogue = true;
   for (const [key, route] of Object.entries(contextRoutes)) guides.get(key).route = route;
   const svc = await start({ customers: [customer], guides, model: createGuideModel({ picks: ['dashboard'], answer: ['Here are the verified steps.'] }) });
@@ -256,7 +257,9 @@ test('French welcome controls have labels, and the panel uses mobile safe-area s
 test('the read-only catalogue requires an owned signed session and returns only eligible localized titles and keys', async (t) => {
   const customer = alice();
   const stranger = bob();
-  const svc = await start({ customers: [customer, stranger] });
+  const guides = loadGuides(GUIDES);
+  for (const guide of guides.values()) guide.customerCatalogue = guide.id === 'my-cases';
+  const svc = await start({ customers: [customer, stranger], guides });
   t.after(svc.close);
   const session = await openSession(svc, customer, { gating: { usePackages: false, audience: 'individual' } });
   const query = `language=fr&path=%2Foverview&conversationId=${encodeURIComponent(session.conversationId)}`;

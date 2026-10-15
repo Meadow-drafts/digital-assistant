@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { startService } from './harness/start-service.js';
 import { createFakeModel } from './harness/fake-model.js';
 import { createFakeClock } from './harness/fake-clock.js';
-import { openWidget } from './harness/open-widget.js';
+import { messageText, openWidget } from './harness/open-widget.js';
 
 // Ticket 50 (story 107): the widget on a poor connection. Offline, slow and dropped streams are simulated by the
 // harness network; every wait is the controllable clock, so nothing here sleeps.
@@ -34,7 +34,7 @@ test('offline: the message is queued, the status says Reconnecting, and it is se
 
   w.net.setOffline(false, w.dom.window);
   w.dom.window.dispatchEvent(new w.dom.window.Event('online'));
-  await w.until(() => bubbles(w, 'assistant').some((m) => m.textContent === 'Go to Transfers.'));
+  await w.until(() => bubbles(w, 'assistant').some((m) => messageText(m) === 'Go to Transfers.'));
 
   assert.equal(svc.model.calls.length, 1);
   assert.equal(bubbles(w, 'user').length, 1);
@@ -54,7 +54,7 @@ test('messages typed offline are sent in order, each once', async (t) => {
   await w.until(() => bubbles(w, 'assistant').length === 2 && w.q('thinking').hidden);
 
   assert.deepEqual(w.net.requests.map((r) => r.message), ['one', 'two']);
-  assert.deepEqual(bubbles(w, 'assistant').map((m) => m.textContent), ['first answer', 'second answer']);
+  assert.deepEqual(bubbles(w, 'assistant').map(messageText), ['first answer', 'second answer']);
   assert.equal(svc.model.calls.length, 2);
 });
 
@@ -72,7 +72,7 @@ test('a failing connection is retried with growing delays, then the reply arrive
 
   w.net.offline = false;
   await clock.advance(4000);
-  await w.until(() => bubbles(w, 'assistant').some((m) => m.textContent === 'Go to Transfers.'));
+  await w.until(() => bubbles(w, 'assistant').some((m) => messageText(m) === 'Go to Transfers.'));
 
   assert.deepEqual(delays.filter((d) => [1000, 2000, 4000].includes(d)), [1000, 2000, 4000]);
   assert.equal(svc.model.calls.length, 1);
@@ -85,11 +85,11 @@ test('a stream dropped mid-reply is resumed: one full reply, the message process
   w.net.cutAfterEvent = { type: 'delta', textPrefix: 'Go to ' }; // deliver a partial reply, then drop the stream
 
   await w.send('How do I send money?');
-  await w.until(() => shown(w) && bubbles(w, 'assistant')[0]?.textContent === 'Go to ');
+  await w.until(() => shown(w) && messageText(bubbles(w, 'assistant')[0]) === 'Go to ');
   assert.equal(bubbles(w, 'assistant')[0].dataset.incomplete, 'true');
 
   await clock.advance(1000);
-  await w.until(() => bubbles(w, 'assistant').some((m) => m.textContent === 'Go to Transfers.') && !shown(w));
+  await w.until(() => bubbles(w, 'assistant').some((m) => messageText(m) === 'Go to Transfers.') && !shown(w));
 
   assert.equal(bubbles(w, 'assistant').length, 1);
   assert.equal(bubbles(w, 'assistant')[0].dataset.incomplete, undefined);
@@ -124,7 +124,7 @@ test('when every retry fails the reply is shown as incomplete with a Try again b
 
   w.net.offline = false;
   w.q('retry').click();
-  await w.until(() => bubbles(w, 'assistant').some((m) => m.textContent === 'Go to Transfers.'));
+  await w.until(() => bubbles(w, 'assistant').some((m) => messageText(m) === 'Go to Transfers.'));
 
   assert.equal(w.q('retry'), null);
   assert.equal(bubbles(w, 'assistant').length, 1);
@@ -144,7 +144,7 @@ test('a slow network shows a status without giving up, and the reply still arriv
   assert.match(status(w).textContent, /slow/i);
 
   w.net.release();
-  await w.until(() => bubbles(w, 'assistant').some((m) => m.textContent === 'Go to Transfers.') && !shown(w));
+  await w.until(() => bubbles(w, 'assistant').some((m) => messageText(m) === 'Go to Transfers.') && !shown(w));
   assert.equal(svc.model.calls.length, 1);
   assert.equal(w.net.requests.length, 1);
 });
@@ -160,7 +160,7 @@ test('a stalled request is dropped and retried with the same message id; the ser
   w.net.hold = false;
   await clock.advance(1000);
   assert.equal(w.net.requests.length, 2, 'the aborted request should be retried');
-  await w.until(() => bubbles(w, 'assistant').some((m) => m.textContent === 'Go to Transfers.'));
+  await w.until(() => bubbles(w, 'assistant').some((m) => messageText(m) === 'Go to Transfers.'));
 
   assert.equal(w.net.requests.length, 2);
   assert.equal(w.net.requests[0].messageId, w.net.requests[1].messageId);

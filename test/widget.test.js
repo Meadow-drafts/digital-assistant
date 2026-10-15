@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { startService } from './harness/start-service.js';
 import { createFakeModel } from './harness/fake-model.js';
-import { openWidget } from './harness/open-widget.js';
+import { messageText, openWidget } from './harness/open-widget.js';
 
 test('disclaimer is visible on load, outside the transcript, and states the PIN/OTP rule', async (t) => {
   const svc = await startService();
@@ -30,7 +30,7 @@ test('a sent message shows a thinking state, then the streamed reply', async (t)
   assert.equal(w.qa('message').find((m) => m.dataset.from === 'user').textContent, 'How do I send money?');
 
   release();
-  await w.until(() => w.qa('message').some((m) => m.dataset.from === 'assistant' && m.textContent === 'Go to Transfers.'));
+  await w.until(() => w.qa('message').some((m) => m.dataset.from === 'assistant' && messageText(m) === 'Go to Transfers.'));
   assert.equal(w.q('thinking').hidden, true);
 });
 
@@ -98,7 +98,7 @@ test('a refusal shows the fixed next-step card after the reply, and a busy turn 
 
   await w.send('Tell me my PIN');
   await w.until(() => w.qa('next-step').length === 1);
-  assert.equal(w.qa('message').find((m) => m.dataset.from === 'assistant').textContent, 'I never need your PIN.');
+  assert.equal(messageText(w.qa('message').find((m) => m.dataset.from === 'assistant')), 'I never need your PIN.');
   assert.equal(w.qa('next-step')[0].textContent, 'Talk to a human agent');
 
   await w.send('And again');

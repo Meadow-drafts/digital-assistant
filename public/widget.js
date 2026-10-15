@@ -1549,6 +1549,10 @@ class BankAssistant extends HTMLElement {
       button.className = 'ba-chip';
       button.textContent = option;
       button.addEventListener('click', () => {
+        if (/^(talk to (?:a )?human agent|talk to an agent|parler à un agent)$/i.test(option)) {
+          this.q('human-chip').click();
+          return;
+        }
         this.q('input').value = option;
         this.q('input').focus();
       });
@@ -1834,6 +1838,8 @@ class BankAssistant extends HTMLElement {
           if (ev.conversationId) this.conversationId = ev.conversationId; // a drop before the end can still resume this chat
         } else if (ev.type === 'case') {
           automated = ev.automated === true || this.caseView?.state === 'waiting'; // the bot answering while a case waits for an agent
+        } else if (ev.type === 'guides') {
+          turn.guides = Array.isArray(ev.guides) ? ev.guides.filter((guide) => typeof guide?.title === 'string') : [];
         } else if (ev.type === 'delta') {
           // Keep a partial answer visible while a retry is still connecting. Replace it only once
           // the resumed stream actually delivers new answer text.
@@ -1882,6 +1888,14 @@ class BankAssistant extends HTMLElement {
           if (bubble) {
             this.renderAssistantMessage(bubble, turn.replyText, turn.safeLinks);
             for (const action of turn.actionLinks) this.addActionLink(bubble, action);
+            if (turn.guides?.length) {
+              const used = document.createElement('small');
+              used.dataset.role = 'guides-used';
+              used.textContent = this.lang === 'fr'
+                ? `Ce que j'ai utilisé : ${turn.guides.map((guide) => guide.title).join(', ')}`
+                : `What I used: ${turn.guides.map((guide) => guide.title).join(', ')}`;
+              bubble.querySelector('[data-role="message-content"]').append(used);
+            }
             if (automated) {
               const label = document.createElement('small');
               label.dataset.role = 'automated-label';
