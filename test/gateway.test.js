@@ -37,6 +37,14 @@ test('requests go to the tenant\'s gateway with the user\'s own token and no ser
   assert.deepEqual(Object.keys(call.init.headers).filter((h) => /api-uuid|key/i.test(h)), []);
 });
 
+test('agency requests use the selected tenant API prefix and signed-in teller token', async () => {
+  const { sent, fetch } = recordingFetch();
+  const gateway = createHttpGateway({ tenants: { 'bicec-agency': { baseUrl: 'https://agency.test', apiPrefix: '/agencybank' } }, fetch });
+  await gateway.request({ tenant: 'bicec-agency', method: 'GET', path: '/transactions/history/teller', token: 'teller-token' });
+  assert.equal(sent[0].url, 'https://agency.test/agencybank/transactions/history/teller');
+  assert.equal(sent[0].init.headers.authorization, 'teller-token');
+});
+
 test('through the service, a session for a tenant outside the allowlist is unavailable and nothing is contacted', async (t) => {
   const { sent, fetch } = recordingFetch();
   const gateway = createHttpGateway({ tenants: { demo: 'https://gateway.test' }, fetch });

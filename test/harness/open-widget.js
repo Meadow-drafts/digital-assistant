@@ -8,7 +8,7 @@ import { createFakeClock } from './fake-clock.js';
 // events (dropped mid-reply). `requests`: the /chat bodies the widget sent.
 export function createNetwork() {
   const net = {
-    offline: false, hold: false, cutAfterEvents: null, cutAfterEvent: null, requests: [],
+    offline: false, hold: false, cutAfterEvents: null, cutAfterEvent: null, requests: [], topicRequests: [],
     setOffline(value, window) {
       net.offline = value;
       Object.defineProperty(window.navigator, 'onLine', { value: !value, configurable: true });
@@ -36,6 +36,7 @@ function withNetwork(net, window, baseUrl) {
     if (net.offline) throw new TypeError('Failed to fetch');
     const target = new URL(url, baseUrl);
     if (target.pathname === '/chat') net.requests.push(JSON.parse(init.body));
+    if (target.pathname === '/help/topics') net.topicRequests.push(target.searchParams.toString());
     // jsdom's AbortSignal is not Node's: pass the request on without it.
     const { signal, ...rest } = init;
     const pending = rawFetch(target, rest);

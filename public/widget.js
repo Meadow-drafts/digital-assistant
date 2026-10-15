@@ -201,6 +201,12 @@ const BACKOFF = [1000, 2000, 4000, 8000, 16000];
 const SLOW_MS = 8000; // no byte for this long: say so
 const STALL_MS = 30000; // no byte for this long: give up on the request and retry it
 const newId = () => (globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`);
+const agencySubjectHint = (token) => {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return typeof payload.sub === 'string' ? `sub:${payload.sub}` : `token:${token}`;
+  } catch { return `token:${token}`; }
+};
 const lost = (e) => Object.assign(e instanceof Error ? e : new Error(String(e)), { retriable: true });
 const transientStatus = (status) => status === 408 || status === 429 || status >= 500;
 const brandColor = (value) => {
@@ -523,6 +529,18 @@ class BankAssistant extends HTMLElement {
       }
     });
     this.onRouteChange = () => this.refreshTopics();
+    this.onSessionChange = () => {
+      if (this.getAttribute('data-mode') !== 'agency') return;
+      const token = this.getToken?.() ?? '';
+      const subject = agencySubjectHint(token);
+      if (this.agencySubjectHint && this.agencySubjectHint !== subject) this.newChat();
+      this.agencySubjectHint = subject;
+      this.dropSession();
+      if (token) this.startSession(token).then(() => this.refreshTopics());
+      else { this.conversationId = null; this.topics = []; this.context = null; this.renderTopics(); }
+    };
+    window.addEventListener('bank-assistant:session-change', this.onSessionChange);
+    this.addEventListener('bank-assistant:session-change', this.onSessionChange);
     window.addEventListener('popstate', this.onRouteChange);
     window.addEventListener('hashchange', this.onRouteChange);
     window.addEventListener('bank-assistant:page-change', this.onRouteChange);
@@ -534,8 +552,14 @@ class BankAssistant extends HTMLElement {
     this.q('form').addEventListener('submit', (e) => { e.preventDefault(); this.submit(); });
     this.q('pin-box').addEventListener('submit', (e) => { e.preventDefault(); this.submitPin(); });
     // Only this click opens a handoff: the host hears about it, then the service is asked for a case.
-    this.q('human-chip').addEventListener('click', () => {
+    this.q('human-chip').addEventListener('click', async () => {
       this.dispatchEvent(new CustomEvent('bank-assistant:handoff-request', { bubbles: true, detail: { conversationId: this.conversationId } }));
+      if (this.getAttribute('data-mode') === 'agency') {
+        await this.startSession(this.token());
+        if (this.conversationId) this.openDraft();
+        else this.addNote(TEXT[this.lang].handoffError);
+        return;
+      }
       // A dispute-like situation starts with a drafted message to review; anything else opens the handoff as before.
       if (this.disputeLike && this.conversationId) this.openDraft();
       else this.startHandoff();
@@ -590,6 +614,8 @@ class BankAssistant extends HTMLElement {
     window.removeEventListener('popstate', this.onRouteChange);
     window.removeEventListener('hashchange', this.onRouteChange);
     window.removeEventListener('bank-assistant:page-change', this.onRouteChange);
+    window.removeEventListener('bank-assistant:session-change', this.onSessionChange);
+    this.removeEventListener('bank-assistant:session-change', this.onSessionChange);
     window.removeEventListener('resize', this.onPanelResize);
     for (const [name, original, wrapped] of this.historyMethods ?? []) {
       if (window.history[name] === wrapped) window.history[name] = original;
@@ -1234,6 +1260,11 @@ class BankAssistant extends HTMLElement {
     set('draft-review', t.review);
     set('draft-skip', t.skip);
     set('draft-discard', t.discard);
+    if (this.getAttribute('data-mode') === 'agency') {
+      this.q('draft-skip').hidden = true;
+      this.q('dest-email').closest('label').hidden = true;
+      this.q('dest-both').closest('label').hidden = true;
+    }
     set('draft-confirm-note', t.confirmNote);
     set('preview-chat-title', t.previewChat);
     set('preview-email-title', t.previewEmail);
@@ -1561,6 +1592,30 @@ class BankAssistant extends HTMLElement {
   // under the customer's own token and fixes the ids. Chat works without it
   // (how-to help only), so a failure here is not fatal.
   async startSession(token, signal) {
+    const agency = this.getAttribute('data-mode') === 'agency';
+    if (agency && !token) return;
+    if (agency) {
+      if (this.sessionStarted) return;
+      if (this.agencySessionPromise) return this.agencySessionPromise;
+      this.agencySessionPromise = (async () => {
+        try {
+          const res = await fetch(`${this.getAttribute('api') ?? ''}/session`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+            body: JSON.stringify({ tenant: this.getAttribute('tenant'), conversationId: this.conversationId }),
+            signal,
+          });
+          if (!res.ok) { this.dropSession(); return; }
+          const started = await res.json();
+          this.conversationId = started.conversationId;
+          this.sessionId = typeof started.sessionId === 'string' ? started.sessionId : null;
+          this.sessionStarted = true;
+        } catch { this.sessionDown = true; }
+        finally { this.agencySessionPromise = null; }
+      })();
+      await this.agencySessionPromise;
+      return;
+    }
     const cli = this.getCli?.() ?? this.getAttribute('cli');
     if (!cli && this.getCli && !this.noAccountShown) {
       // A host that supplies a customer id (the portal) gave none: say so once, instead of failing silently.

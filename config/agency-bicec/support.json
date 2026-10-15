@@ -1,0 +1,22 @@
+{
+  "_note": "Isolated BICEC agency support configuration. Replace all demo identities and contact details before deployment.",
+  "agents": {
+    "list": [
+      { "id": "agency-demo", "name": "Agency support placeholder", "email": "agency-support@example.test", "password": "change-me-agency" }
+    ],
+    "onCall": ["agency-demo"],
+    "auditReaders": ["agency-demo"],
+    "sessionMs": 28800000
+  },
+  "timers": {
+    "broadcastMs": 300000,
+    "queuedNoticeMs": 900000,
+    "absentMs": 120000,
+    "agentSilenceMs": 600000,
+    "agentFollowUpMs": 1800000,
+    "autoResolveMs": 86400000,
+    "reopenWindowMs": 259200000
+  },
+  "hours": { "utcOffsetMinutes": 60, "days": [1, 2, 3, 4, 5], "open": "08:00", "close": "17:00" },
+  "mail": { "mode": "log", "from": "agency-assistant@example.test", "supportAddress": "agency-support@example.test", "smtp": { "host": "localhost", "port": 1025, "secure": false, "user": null, "password": null } }
+}

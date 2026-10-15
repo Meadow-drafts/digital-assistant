@@ -23,6 +23,8 @@ import { asksAboutCurrentPage, verifiedPageContext } from './page-context.js';
 import { commonVerifiedStep } from './guides.js';
 import { socialKind, socialReply } from './social.js';
 import { maskText } from './mask.js';
+import { classifyAgencyHistoryQuestion, createAgencyHistory, maskAgencyReferenceText } from './agency-history.js';
+import { classifyAgencyUnsafeRequest } from './agency-safety.js';
 
 const PUBLIC = new URL('../public/', import.meta.url);
 // Only these files are served; no user-controlled path ever reaches the disk.
@@ -140,12 +142,13 @@ const referencesOf = (result) => [result?.transaction?.reference, ...(result?.tr
 const normalizeChoiceText = (text, language) => text.toLocaleLowerCase(language)
   .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
-export function createService({ allowedOrigins = [], devPage, model, gateway, clock, audit: auditSink, guides, navigation, scamCues, entitlements, failedQuestions, outputAllowlist, limits, mailer, agents, support, consoleUrl, retention, sessionSecret, sessionTtlMs, database }) {
+export function createService({ allowedOrigins = [], devPage, model, gateway, clock, audit: auditSink, guides, navigation, scamCues, entitlements, failedQuestions, outputAllowlist, limits, mailer, agents, support, consoleUrl, retention, sessionSecret, sessionTtlMs, database, agencyProfile = null }) {
   // Every audit record goes through the trail: complete fields, nothing secret-shaped stored.
   const audit = createAuditTrail({ sink: auditSink, clock });
   // Failed questions are stored masked and cut short, through one write point (the sink itself stays for the dashboard and the retention job).
   const failedTrail = failedQuestions ? createFailedQuestionTrail({ sink: failedQuestions }) : null;
   const t1 = gateway ? createT1({ gateway, clock }) : null;
+  const agencyHistory = agencyProfile && gateway ? createAgencyHistory({ gateway }) : null;
   const limiter = createLimiter({ clock, limits });
   const checkOutput = createOutputFilter({ allowlist: outputAllowlist, protectedTexts: PROTECTED_TEXTS });
   // Conversations and cases are kept in memory, and also in SQLite when a database is given (ticket 62).
@@ -153,13 +156,16 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
   // Who is asking (ticket 38): the owner of everything a customer touches comes from the signed session id, never from the
   // raw token subject. Pseudonymous user id for the audit log and rate limits: the verified owner, else the guest's.
   const identity = createIdentity({ secret: sessionSecret, clock, ttlMs: sessionTtlMs });
+  const agencyTenantId = agencyProfile ? Object.keys(agencyProfile.tenants)[0] : null;
   const pseudonym = (req) => { const who = identity.resolve(req); return who.owner ?? guestOwnerOf(tokenOf(req)); };
   const handoff = createHandoff({
     identity, database, clock, audit, failedQuestions, mailer, agents, support, consoleUrl, conversations, retentionMs: retention?.ms,
     model: model && limiter.track(model), // agent summaries spend the same global token budget
     // Suggested replies take the metered path: counted as requests and tokens, and not run once a global budget is used up.
     suggestions: { model, meter: (m) => limiter.meter(m), budgetHit: () => limiter.budgetHit(), checkOutput },
-    recordsFor: async ({ conversation, req, tenant }) => (t1 && req ? t1.recentMasked(conversation, tokenOf(req), await entitlementsFor(req, tenant, conversation)) : null),
+    recordsFor: async ({ conversation, req, tenant }) => (!agencyProfile && t1 && req ? t1.recentMasked(conversation, tokenOf(req), await entitlementsFor(req, tenant, conversation)) : null),
+    tenantId: agencyTenantId,
+    agencyProfile,
   });
 
   // Fail closed: if entitlements cannot be read, offer only guides that need
@@ -202,6 +208,35 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     const reply = (status, payload) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(payload));
     let body;
     try { body = await readJson(req); } catch { reply(400, { error: 'bad_request' }); return; }
+    if (agencyProfile) body.tenant = agencyTenantId;
+    if (agencyProfile) {
+      const token = tokenOf(req);
+      if (!token) { reply(401, { error: 'session_expired' }); return; }
+      const tenant = agencyTenantId;
+      let accepted;
+      try {
+        accepted = await gateway.request({ tenant, token, method: 'GET', path: '/transactions/history/teller', query: { page: 0, limit: 100000 } });
+      } catch { reply(502, { error: 'unavailable' }); return; }
+      if (!accepted || accepted.status !== 200) {
+        reply(accepted?.status === 401 || accepted?.status === 409 ? 401 : 502, { error: accepted?.status === 401 || accepted?.status === 409 ? 'session_expired' : 'unavailable' });
+        return;
+      }
+      const scopedRows = accepted.body?.data?.content ?? accepted.body?.content;
+      if (!Array.isArray(scopedRows)) { reply(502, { error: 'unavailable' }); return; }
+      const owner = ownerOf(token);
+      const known = typeof body?.conversationId === 'string' ? conversations.get(body.conversationId) : undefined;
+      if (known && known.owner !== owner && known.owner !== guestOwnerOf(token)) { reply(404, { error: 'not_found' }); return; }
+      const conversationId = known ? body.conversationId : randomUUID();
+      const conversation = known ?? { owner, history: [], language: 'en', asked: new Set(), feedback: [], session: null };
+      conversation.owner = owner;
+      conversation.lastActiveAt = clock.now();
+      conversation.session = Object.freeze({ tenant, teller: true });
+      conversation.unlock = null;
+      conversations.set(conversationId, conversation);
+      await audit.append({ time: new Date(clock.now()).toISOString(), user: owner, tenant, conversationId, userText: '', replyText: '', outcome: 'session_started' });
+      reply(200, { conversationId, sessionId: identity.issue(token).sessionId });
+      return;
+    }
     if (!t1) { reply(404, { error: 'not_available' }); return; }
     // The owner of a verified session is derived from the token the gateway is about to accept; a conversation the same
     // token began as a guest may be taken over by it, nobody else's.
@@ -336,7 +371,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
       airtime: { en: 'Get help buying airtime', fr: 'Obtenir de l’aide pour acheter du crédit téléphonique' },
       request_to_pay: { en: 'Get help with payment requests', fr: 'Obtenir de l’aide sur les demandes de paiement' },
     };
-    const context = route ? {
+    const context = !agencyProfile && route ? {
       label: route[1].labels[lang] ?? route[1].labels.en,
       description: contextGuides.length
         ? contextDescriptions[route[0]]?.[lang] ?? (lang === 'fr' ? 'Consulter les conseils pour cette page' : 'See guidance for this page')
@@ -408,15 +443,19 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
   async function handleChat(req, res) {
     let body;
     try { body = await readJson(req); } catch { res.writeHead(400).end(); return; }
+    if (agencyProfile) body.tenant = agencyTenantId;
     if (typeof body?.message !== 'string' || !body.message.trim()) { res.writeHead(400).end(); return; }
 
     // Everything past this point sees only the redacted text; the raw message is never stored.
     const shielded = shield(body.message);
-    const message = shielded.text;
+    const historyQuestion = agencyProfile ? classifyAgencyHistoryQuestion(shielded.text) : null;
+    const agencyUnsafeRequest = agencyProfile ? classifyAgencyUnsafeRequest(shielded.text, shielded.flagged) : null;
+    const message = agencyProfile ? maskAgencyReferenceText(shielded.text) : shielded.text;
     // A conversation belongs to the customer who started it. An id the service
     // did not issue is ignored; someone else's id is refused without saying it exists.
     const who = identity.resolve(req);
     if (who.error) { sessionExpired(res); return; }
+    if (agencyProfile && (!who.verified || !tokenOf(req))) { sessionExpired(res); return; }
     const owner = who.owner;
     const known = typeof body.conversationId === 'string' ? conversations.get(body.conversationId) : undefined;
     if (known && known.owner !== owner) {
@@ -432,6 +471,8 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     if (turnKey && replayTurn(turnKey, res)) return;
     const conversationId = known ? body.conversationId : randomUUID();
     const conversation = known ?? { owner, history: [], language: 'en', asked: new Set(), session: null };
+    if (agencyProfile && conversation.session?.teller !== true) { sessionExpired(res); return; }
+    if (agencyProfile) body.tenant = agencyTenantId;
     if (turnKey) recordTurn(turnKey, res);
     conversation.lastActiveAt = clock.now();
     const language = detectLanguage(body.message, conversation.language);
@@ -655,17 +696,17 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     try {
       if (guides) {
         const ent = await entitlementsFor(req, body.tenant, conversation);
-        const available = guides.availableFor(ent);
+        const available = guides.availableFor(ent).filter((guide) => !agencyProfile || guide.customerCatalogue);
         const page = verifiedPageContext(body.pageContext, { navigation, availableGuides: available, language, now: clock.now() });
         const pendingTransfer = conversation.transferSupport ?? null;
-        const complaint = isTransferComplaint(message);
+        const complaint = !agencyProfile && isTransferComplaint(message);
         let transferReply = null;
         let transferTool = null;
         if (complaint && !pendingTransfer) conversation.transferSupport = { stage: 'timing', attempts: 0 };
         let transfer = conversation.transferSupport;
         const selectionText = message.normalize('NFD').replace(/\p{Diacritic}/gu, '');
-        const findReferenceRequest = /where do i find (?:the )?reference|where is (?:the )?reference|ou trouver la reference|ou se trouve la reference/i.test(selectionText);
-        const anotherTransfer = /check another transfer|another transfer|verifier un autre transfert|autre transfert/i.test(selectionText);
+        const findReferenceRequest = !agencyProfile && /where do i find (?:the )?reference|where is (?:the )?reference|ou trouver la reference|ou se trouve la reference/i.test(selectionText);
+        const anotherTransfer = !agencyProfile && /check another transfer|another transfer|verifier un autre transfert|autre transfert/i.test(selectionText);
         if (transfer?.stage === 'result') {
           if (complaint) conversation.transferSupport = transfer = { stage: 'timing', attempts: 0 };
           else if (findReferenceRequest || anotherTransfer) transfer.stage = 'reference';
@@ -688,22 +729,59 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
           if (complaint && !pendingTransfer) transferReply = HISTORY_HELP[language];
         }
         const requestedGuide = typeof body.guideKey === 'string' ? available.find((guide) => guide.id === body.guideKey && guide.customerCatalogue) : null;
+        let agencyHistoryReply = null;
+        if (historyQuestion?.kind === 'prohibited_detail') {
+          agencyHistoryReply = language === 'fr'
+            ? 'Je ne peux pas fournir de détails ni de statut de transaction. Consultez l’historique du portail ou contactez le support agence habilité.'
+            : 'I cannot provide transaction details or status. Check the portal history or contact authorized agency support.';
+        } else if (historyQuestion?.kind === 'lookup' && !historyQuestion.reference) {
+          agencyHistoryReply = language === 'fr'
+            ? 'Pour une recherche dans l’historique, fournissez la référence exacte de la transaction. Un numéro de téléphone seul ne suffit pas.'
+            : 'To search history, provide the exact transaction reference. A phone number alone is not enough.';
+        } else if (historyQuestion?.kind === 'lookup') {
+          const found = await agencyHistory.findExact({ tenant: body.tenant, token: tokenOf(req), reference: historyQuestion.reference });
+          agencyHistoryReply = found.kind === 'matched'
+            ? language === 'fr'
+              ? 'Une entrée correspondante apparaît dans l’historique du guichet. Pour consulter les informations autorisées, ouvrez l’historique dans le portail.'
+              : 'A matching entry appears in teller history. Open portal history to review the permitted information.'
+            : found.kind === 'not_found'
+              ? language === 'fr'
+                ? 'Aucune entrée correspondante n’apparaît dans l’historique accessible. Vérifiez la référence dans le portail ou contactez le support agence habilité.'
+                : 'No matching entry appears in the available history. Check the reference in the portal or contact authorized agency support.'
+              : language === 'fr'
+                ? 'La recherche dans l’historique n’est pas disponible. Consultez le portail ou contactez le support agence habilité.'
+                : 'The history search is unavailable. Check the portal or contact authorized agency support.';
+        }
         const selected = requestedGuide ?? pendingClarification?.guideIds
           .map((id) => available.find((guide) => guide.id === id))
           .find((guide) => guide && normalizeChoiceText(guide[language].title, language) === normalizeChoiceText(message, language));
-        let routed = transferTool
+        let agencySafetyReply = null;
+        if (agencyUnsafeRequest) {
+          agencySafetyReply = agencyUnsafeRequest === 'secret'
+            ? language === 'fr'
+              ? 'Ne partagez jamais votre PIN, OTP ou autre secret d’authentification. Je ne peux pas les utiliser. Consultez le guide générique du guichet ou contactez le support agence habilité.'
+              : 'Never share your PIN, OTP, or other authentication secret. I cannot use credentials or carry out teller actions. Consult the generic teller guidance or contact authorized agency support.'
+            : language === 'fr'
+              ? 'Je ne peux pas remplir, soumettre ni exécuter une opération de guichet, ni approuver une validation. Consultez le guide générique ou contactez le support agence habilité.'
+              : 'I cannot fill, submit, or execute teller actions, or approve a validation. Consult the generic guidance or contact authorized agency support.';
+        }
+        let routed = agencySafetyReply
+          ? { picks: [], refusal: 'execute' }
+          : agencyHistoryReply
+          ? { picks: [], refusal: null }
+          : transferTool
           ? { picks: [], refusal: null, tool: transferTool, toolSource: 'customer_reference' }
           : transferReply
             ? { picks: [], refusal: null }
             : selected
               ? { picks: [selected.id], refusal: null }
-              : await routeGuides({ model: turnModel, language, available, guides, history, tools: t1 ? TOOL_RULES : '', page });
+              : await routeGuides({ model: turnModel, language, available, guides, history, tools: t1 && !agencyProfile ? TOOL_RULES : '', page: agencyProfile ? null : page });
         // Common account-transfer and vague help phrasing was model-routed inconsistently.
         // Resolve it after the model has had a chance to refuse unsafe asks.
-        if (!transferTool && !transferReply && !selected && routed.refusal === 'execute' && !asksToComplete(message)) {
-          routed = await routeGuides({ model: turnModel, language, available, guides, history, tools: t1 ? TOOL_RULES : '', retry: true, page });
+        if (!agencyUnsafeRequest && !transferTool && !transferReply && !selected && routed.refusal === 'execute' && !asksToComplete(message)) {
+          routed = await routeGuides({ model: turnModel, language, available, guides, history, tools: t1 && !agencyProfile ? TOOL_RULES : '', retry: true, page: agencyProfile ? null : page });
         }
-        if (!transferTool && !transferReply && !selected && !routed.tool && (!routed.refusal || routed.refusal === 'execute' && !asksToComplete(message))) {
+        if (!agencyUnsafeRequest && !transferTool && !transferReply && !selected && !routed.tool && (!routed.refusal || routed.refusal === 'execute' && !asksToComplete(message))) {
           routed = transferGuideIntent(message, available) ?? routed;
         }
         let askClarification = false;
@@ -730,6 +808,16 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
           reply = question;
           send(res, 'guides', { guides: [] });
           send(res, 'clarification', { question, options });
+        } else if (agencySafetyReply) {
+          refusal = 'execute';
+          reply += agencySafetyReply;
+          send(res, 'delta', { text: agencySafetyReply });
+          send(res, 'refusal', { category: 'execute', card: refusalCard('execute', language) });
+          send(res, 'guides', { guides: [] });
+        } else if (agencyHistoryReply) {
+          reply += agencyHistoryReply;
+          send(res, 'delta', { text: agencyHistoryReply });
+          send(res, 'guides', { guides: [] });
         } else if (transferReply) {
           let text = transferReply;
           const canNavigate = navigation ? validateProposal(navigation, 'history', language, ent) : null;
@@ -746,6 +834,13 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
             ? TRANSFER_QUICK_REPLIES[language]
             : [TRANSFER_QUICK_REPLIES[language][2]] });
           send(res, 'guides', { guides: [] });
+        } else if (routed.tool && agencyProfile) {
+          refusal = 'off_topic';
+          reply = language === 'fr'
+            ? 'Je ne peux pas consulter de données de transaction avec cette fonction. Utilisez l’historique du portail ou contactez le support habilité.'
+            : 'I cannot look up transaction data with this assistant yet. Use the portal history or contact authorized support.';
+          send(res, 'delta', { text: reply });
+          send(res, 'refusal', { category: 'off_topic', card: refusalCard('off_topic', language) });
         } else if (routed.tool) {
           // Without a gateway there is no session to read from: the customer is told to sign in, never that no guide matched.
           const guidedTransferLocked = conversation.transferSupport?.stage === 'checking' && ent?.packages && !ent.packages.includes('HIST');
@@ -868,7 +963,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
 
   handoff.resume(); // timers of the cases loaded from the database
 
-  const drafts = createDrafts({ identity, t1, entitlementsFor, conversations, handoff, supportAddress: support?.mail?.supportAddress, mailer, clock, audit });
+  const drafts = createDrafts({ identity, t1, entitlementsFor, conversations, handoff, supportAddress: support?.mail?.supportAddress, mailer, clock, audit, agencyProfile, tenantId: agencyTenantId });
 
   const server = http.createServer((req, res) => {
     const fail = () => { if (!res.headersSent) res.writeHead(500); res.end(); };
@@ -897,6 +992,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
       return;
     }
     if (req.method === 'POST' && req.url === '/unlock') {
+      if (agencyProfile) { res.writeHead(404).end(); return; }
       handleUnlock(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end(); });
       return;
     }

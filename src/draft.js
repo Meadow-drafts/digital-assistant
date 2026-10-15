@@ -53,7 +53,7 @@ function detailLines(tx, language) {
 
 // The customer's drafted case message (ticket 31). Nothing here sends anything: a draft only becomes a case or an
 // email when the customer confirms the exact content they were shown.
-export function createDrafts({ identity, t1, entitlementsFor, conversations, handoff, supportAddress, mailer, clock, audit }) {
+export function createDrafts({ identity, t1, entitlementsFor, conversations, handoff, supportAddress, mailer, clock, audit, agencyProfile = null, tenantId = null }) {
   const drafts = new Map(); // conversationId -> the customer's current draft
 
   async function create(req, res) {
@@ -64,13 +64,18 @@ export function createDrafts({ identity, t1, entitlementsFor, conversations, han
     const conversation = typeof body?.conversationId === 'string' ? conversations.get(body.conversationId) : undefined;
     if (!conversation || conversation.owner !== who.owner) { json(res, 404, { error: 'not_found' }); return; }
     const language = conversation.language;
-    const entitlements = await entitlementsFor(req, body.tenant, conversation);
-    const found = t1 ? await t1.caseTransaction(conversation, tokenOf(req), entitlements, body.reference ?? conversation.lastReference) : null;
+    const tenant = tenantId ?? body.tenant;
+    const entitlements = await entitlementsFor(req, tenant, conversation);
+    const found = !agencyProfile && t1 ? await t1.caseTransaction(conversation, tokenOf(req), entitlements, body.reference ?? conversation.lastReference) : null;
     const details = found ? detailLines(found.transaction, language) : [];
     const words = conversation.history.filter((m) => m.role === 'user').slice(-MAX_WORDS).map((m) => m.content.slice(0, MAX_WORD_LENGTH));
-    const frame = FRAME[language];
+    const frame = agencyProfile
+      ? language === 'fr'
+        ? { intro: 'Bonjour, j’ai besoin d’aide pour un workflow de guichet.', words: 'Ma demande, avec mes mots :', ask: 'Merci de vérifier ce dossier.' }
+        : { intro: 'Hello, I need help with a teller workflow.', words: 'My request, in my words:', ask: 'Please review this case.' }
+      : FRAME[language];
     const text = [frame.intro, '', frame.words, ...words.map((w) => `> ${w}`), '', frame.ask].join('\n');
-    const draft = { id: randomUUID(), conversationId: body.conversationId, owner: conversation.owner, tenant: typeof body.tenant === 'string' ? body.tenant.slice(0, 40) : null, details, scrub: found?.scrub ?? ((t) => t), ref: null, preview: null };
+    const draft = { id: randomUUID(), conversationId: body.conversationId, owner: conversation.owner, tenant: typeof tenant === 'string' ? tenant.slice(0, 40) : null, details, scrub: found?.scrub ?? ((t) => t), ref: null, preview: null };
     drafts.set(body.conversationId, draft);
     json(res, 200, { draftId: draft.id, language, text, details, detailsFound: Boolean(found) });
   }
@@ -90,7 +95,7 @@ export function createDrafts({ identity, t1, entitlementsFor, conversations, han
     try { body = await readJson(req); } catch { json(res, 400, { error: 'bad_request' }); return; }
     const draft = ownDraft(res, req, body);
     if (!draft) return;
-    if (!DESTINATIONS.includes(body.destination)) { json(res, 400, { error: 'bad_destination' }); return; }
+    if (!DESTINATIONS.includes(body.destination) || agencyProfile && body.destination !== 'chat') { json(res, 400, { error: 'bad_destination' }); return; }
     if (typeof body.text !== 'string' || !body.text.trim() || body.text.length > MAX_TEXT) { json(res, 400, { error: 'bad_text' }); return; }
     const language = conversations.get(draft.conversationId).language;
     // What the customer typed is untrusted like any message: secrets come out, long numbers and the counterparty's name are masked.

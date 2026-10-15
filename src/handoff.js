@@ -4,6 +4,7 @@ import { createCaseStore, lastActivity } from './cases.js';
 import { createHours } from './hours.js';
 import { json, readJson } from './http.js';
 import { maskText } from './mask.js';
+import { maskAgencyReferenceText } from './agency-history.js';
 import { tokenOf } from './identity.js';
 import { cuesIn } from './chip.js';
 import { computeDashboard } from './dashboard.js';
@@ -44,7 +45,7 @@ const CUSTOMER_MAIL = {
 };
 
 // Customer and agent routes for handoff cases. Returns true when it served the request.
-export function createHandoff({ identity, database, clock, audit, failedQuestions, mailer, agents, support, consoleUrl, conversations, model, suggestions, recordsFor, retentionMs }) {
+export function createHandoff({ identity, database, clock, audit, failedQuestions, mailer, agents, support, consoleUrl, conversations, model, suggestions, recordsFor, retentionMs, tenantId = null, agencyProfile = null }) {
   const summarize = createSummarizer({ model });
   const suggest = createSuggester(suggestions ?? {});
   const store = createCaseStore({ clock, database, agentById: (id) => agents?.list?.find((a) => a.id === id) });
@@ -57,7 +58,7 @@ export function createHandoff({ identity, database, clock, audit, failedQuestion
   const sessionMs = agents?.sessionMs ?? 8 * 60 * 60_000;
 
   // The one place text enters a case transcript. Everything except an agent's own words is masked first.
-  const add = (c, from, text, extra) => store.append(c, from, from === 'agent' || from === 'system' ? text : maskText(text), extra);
+  const add = (c, from, text, extra) => store.append(c, from, from === 'agent' || from === 'system' ? text : maskText(agencyProfile ? maskAgencyReferenceText(text) : text), extra);
 
   // Who is calling, from the signed session id (see identity.js); a bad or expired id is a 401. `verified` routes also
   // refuse a guest, who has no gateway-checked identity.
@@ -295,7 +296,7 @@ export function createHandoff({ identity, database, clock, audit, failedQuestion
     const open = store.latestFor(conversationId);
     if (open && (open.state === 'waiting' || open.state === 'with_agent')) { json(res, 200, { conversationId, ...view(open) }); return; }
     if (reopenable(open)) { await reopen(open); json(res, 200, { conversationId, ...view(open) }); return; }
-    const tenant = typeof body?.tenant === 'string' ? body.tenant.slice(0, 40) : conversation.session?.tenant ?? null;
+    const tenant = tenantId ?? (typeof body?.tenant === 'string' ? body.tenant.slice(0, 40) : conversation.session?.tenant ?? null);
     const c = await startCase({ conversationId, conversation, owner, tenant, req });
     json(res, 200, { conversationId, ...view(c) });
   }

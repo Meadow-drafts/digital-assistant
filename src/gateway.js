@@ -5,9 +5,14 @@ export class UnknownTenantError extends Error {}
 // Tenant id -> gateway base URL. The only place a gateway URL can come from:
 // the widget sends a tenant id, never a URL.
 export function loadTenants(pathOrUrl) {
-  const tenants = JSON.parse(readFileSync(pathOrUrl, 'utf8'));
-  for (const [id, url] of Object.entries(tenants)) {
+  const tenants = typeof pathOrUrl === 'string' || pathOrUrl instanceof URL
+    ? JSON.parse(readFileSync(pathOrUrl, 'utf8'))
+    : pathOrUrl;
+  for (const [id, value] of Object.entries(tenants)) {
+    const url = typeof value === 'string' ? value : value?.baseUrl;
+    const apiPrefix = typeof value === 'string' ? '' : value?.apiPrefix ?? '';
     if (!/^https?:\/\/[^/\s]+$/.test(url)) throw new Error(`tenant ${id}: base URL must be an origin without a path`);
+    if (apiPrefix && !/^\/[A-Za-z0-9_-]+$/.test(apiPrefix)) throw new Error(`tenant ${id}: API prefix must be a single path segment`);
   }
   return tenants;
 }
@@ -21,7 +26,13 @@ export function createHttpGateway({ tenants, fetch: doFetch = globalThis.fetch, 
   return {
     async request({ tenant, method, path, query, token, body }) {
       if (!Object.hasOwn(tenants, tenant ?? '')) throw new UnknownTenantError('tenant is not in the allowlist');
-      const url = new URL(path, tenants[tenant]);
+      const entry = tenants[tenant];
+      const baseUrl = typeof entry === 'string' ? entry : entry.baseUrl;
+      const apiPrefix = typeof entry === 'string' ? '' : entry.apiPrefix ?? '';
+      const prefixedPath = apiPrefix && !path.startsWith(`${apiPrefix}/`) && path !== apiPrefix
+        ? `${apiPrefix}${path.startsWith('/') ? path : `/${path}`}`
+        : path;
+      const url = new URL(prefixedPath, baseUrl);
       for (const [k, v] of Object.entries(query ?? {})) url.searchParams.set(k, String(v));
       const res = await doFetch(url, {
         method,

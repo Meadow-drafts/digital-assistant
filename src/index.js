@@ -11,6 +11,9 @@ import { loadRetention } from './retention.js';
 import { createHttpGateway, loadTenants } from './gateway.js';
 import { assertStartup } from './startup.js';
 import { loadSessionSecret, openDatabase } from './database.js';
+import { loadAgencyProfile } from './profile.js';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // Demo entry point. With MODEL_PRIMARY_* set in the environment (see
 // loadModelConfig) the real OpenAI-compatible chain is used; otherwise a
@@ -33,18 +36,33 @@ const scriptedModel = {
 // live in that file in plain text; the production gate refuses them.
 // Mode gate (ticket 35, below): ASSISTANT_MODE=production refuses to start unless every prerequisite is met; demo
 // needs none. It runs before anything is opened or created.
-const support = loadSupport(process.env.SUPPORT_CONFIG ?? new URL('../config/support.json', import.meta.url));
+if (process.env.ASSISTANT_PROFILE === 'bicec-agency' && !process.env.AGENCY_GATEWAY_BASE_URL) {
+  throw new Error('AGENCY_GATEWAY_BASE_URL is required for the isolated BICEC agency assistant');
+}
+const agencyProfile = process.env.ASSISTANT_PROFILE === 'bicec-agency'
+  ? loadAgencyProfile(new URL('../config/agency-bicec/profile.json', import.meta.url))
+  : null;
+if (process.env.ASSISTANT_PROFILE && !agencyProfile) throw new Error(`unsupported ASSISTANT_PROFILE: ${process.env.ASSISTANT_PROFILE}`);
+const agencyPath = (relative) => new URL(`../${relative}`, import.meta.url);
+const dataDirectory = agencyProfile
+  ? fileURLToPath(agencyPath(agencyProfile.dataDirectory))
+  : fileURLToPath(new URL('../data/', import.meta.url));
+const support = loadSupport(agencyProfile
+  ? agencyPath(agencyProfile.supportConfig)
+  : process.env.SUPPORT_CONFIG ?? new URL('../config/support.json', import.meta.url));
 const modelConfig = loadModelConfig(process.env);
 // Gateway base URLs come only from this tenant-id allowlist (demo entry: the bank's test server).
-const tenants = loadTenants(process.env.GATEWAY_TENANTS ?? new URL('../config/tenants.json', import.meta.url));
+const tenants = loadTenants(agencyProfile
+  ? agencyProfile.tenants
+  : process.env.GATEWAY_TENANTS ?? new URL('../config/tenants.json', import.meta.url));
 let mode;
 try { mode = assertStartup({ env: process.env, support, modelConfig, tenants }); } catch (e) { console.error(e.message); process.exit(1); }
 console.log(`mode: ${mode}`);
 
 const clock = { now: () => Date.now(), setTimeout: (f, ms) => setTimeout(f, ms), clearTimeout: (id) => clearTimeout(id) };
-const audit = createFileAudit(process.env.AUDIT_LOG ?? 'data/audit.jsonl');
-const failedQuestions = createFileAudit(process.env.FAILED_QUESTIONS_LOG ?? 'data/failed-questions.jsonl');
-const guides = loadGuides(new URL('../guides/', import.meta.url));
+const audit = createFileAudit(agencyProfile ? path.join(dataDirectory, 'audit.jsonl') : process.env.AUDIT_LOG ?? 'data/audit.jsonl');
+const failedQuestions = createFileAudit(agencyProfile ? path.join(dataDirectory, 'failed-questions.jsonl') : process.env.FAILED_QUESTIONS_LOG ?? 'data/failed-questions.jsonl');
+const guides = loadGuides(agencyProfile ? agencyPath(`${agencyProfile.guidesDirectory}/`) : new URL('../guides/', import.meta.url));
 // Output allowlist: comma-separated OUTPUT_ALLOW_URL_HOSTS / _EMAILS / _PHONES. Empty blocks everything.
 const list = (name) => (process.env[name] ?? '').split(',').map((v) => v.trim()).filter(Boolean);
 // Origins allowed to call the service from a browser page (the portal hosting the widget), exact and comma-separated,
@@ -55,7 +73,7 @@ for (const o of allowedOrigins) {
 }
 const outputAllowlist = { urlHosts: list('OUTPUT_ALLOW_URL_HOSTS'), emails: list('OUTPUT_ALLOW_EMAILS'), phones: list('OUTPUT_ALLOW_PHONES') };
 // Pages the assistant may offer as cards; the bank edits this file when the portal's routes change.
-const navigation = loadNavigation(process.env.NAVIGATE_ROUTES ?? new URL('../config/navigate-routes.json', import.meta.url));
+const navigation = agencyProfile ? null : loadNavigation(process.env.NAVIGATE_ROUTES ?? new URL('../config/navigate-routes.json', import.meta.url));
 // The assistant provides verified steps and allowlisted page links. Customers enter all values themselves.
 const port = Number(process.env.PORT ?? 3000);
 const agents = support.agents;
@@ -78,13 +96,13 @@ if (devPage) console.warn('TEST_TOKEN/TEST_CLI set: the demo page carries a real
 function sessionConfig() {
   const hours = process.env.SESSION_TTL_HOURS === undefined ? 8 : Number(process.env.SESSION_TTL_HOURS);
   if (!Number.isFinite(hours) || hours <= 0) { console.error('SESSION_TTL_HOURS must be a positive number'); process.exit(1); }
-  try { return { sessionSecret: loadSessionSecret(process.env.SESSION_SECRET_FILE ?? 'data/session-secret'), sessionTtlMs: hours * 60 * 60_000 }; } catch (e) { console.error(e.message); process.exit(1); }
+  try { return { sessionSecret: loadSessionSecret(agencyProfile ? path.join(dataDirectory, 'session-secret') : process.env.SESSION_SECRET_FILE ?? 'data/session-secret'), sessionTtlMs: hours * 60 * 60_000 }; } catch (e) { console.error(e.message); process.exit(1); }
 }
 // Cases and conversations are kept in SQLite (ticket 62), by default data/assistant.db (DATABASE_FILE). The file holds only
 // text the service already keeps masked; it is git-ignored and covered by the one retention value.
 let database;
-try { database = openDatabase(process.env.DATABASE_FILE ?? 'data/assistant.db'); } catch (e) { console.error(`database: ${e.message}`); process.exit(1); }
-const server = createService({ allowedOrigins, devPage, model: modelConfig ? createModel(modelConfig) : scriptedModel, gateway, clock, audit, guides, navigation, scamCues, failedQuestions, outputAllowlist, limits: loadLimits(process.env), mailer, agents, support, consoleUrl, retention, database, ...sessionConfig() });
+try { database = openDatabase(agencyProfile ? path.join(dataDirectory, 'assistant.db') : process.env.DATABASE_FILE ?? 'data/assistant.db'); } catch (e) { console.error(`database: ${e.message}`); process.exit(1); }
+const server = createService({ allowedOrigins, devPage: agencyProfile ? undefined : devPage, model: modelConfig ? createModel(modelConfig) : scriptedModel, gateway, clock, audit, guides, navigation, scamCues, failedQuestions, outputAllowlist, limits: loadLimits(process.env), mailer, agents, support, consoleUrl, retention, database, agencyProfile, ...sessionConfig() });
 server.listen(port, () => {
   console.log(`assistant demo host: http://localhost:${port}/`);
   console.log(`storage: ${process.env.DATABASE_FILE ?? 'data/assistant.db'}`);
