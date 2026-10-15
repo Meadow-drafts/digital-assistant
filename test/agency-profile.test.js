@@ -91,7 +91,7 @@ test('agency requests to execute teller actions or use authentication secrets ge
   widget.dom.window.close();
 });
 
-test('unapproved agency guide drafts stay hidden until approval and route hints never produce contextual guidance', async (t) => {
+test('approved agency guides appear as generic topics while route hints never produce contextual help or links', async (t) => {
   const profile = loadAgencyProfile(new URL('../config/agency-bicec/profile.json', import.meta.url));
   const gateway = createFakeGateway({ 'GET /transactions/history/teller': { data: { content: [] } } });
   const svc = await startService({ agencyProfile: profile, gateway, model: createFakeModel(['generic help']), guides: loadGuides(new URL('../guides-agency-bicec/', import.meta.url)) });
@@ -103,8 +103,10 @@ test('unapproved agency guide drafts stay hidden until approval and route hints 
     headers: { authorization: `Bearer ${token}`, 'x-assistant-session': session.sessionId },
   });
   const topics = await topicsResponse.json();
-  assert.equal(topics.topics.length, 0);
+  assert.equal(topics.topics.length, 15);
+  assert.equal(topics.topics[0].key, '00-cash-in');
   assert.equal(topics.context, null);
+  assert.equal(topics.topics.some((topic) => /DRAFT|BROUILLON/i.test(topic.title)), false);
   assert.equal(gateway.calls[0].tenant, 'bicec-agency', 'the client route/tenant hint never selects a gateway tenant');
 });
 

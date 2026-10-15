@@ -1506,6 +1506,41 @@ class BankAssistant extends HTMLElement {
     wrap.scrollIntoView?.({ block: 'nearest', inline: 'start' });
   }
 
+  addAgencyHistory(transaction, language = this.lang) {
+    const labels = language === 'fr'
+      ? ['Date', 'ID', 'De', 'Vers', 'Membre', 'Service', 'Type', 'Montant', 'Frais', 'Motif', 'Statut', 'Motif de l’échec']
+      : ['Date', 'ID', 'From', 'To', 'Member', 'Service', 'Type', 'Amount', 'Fees', 'Reason', 'Status', 'Failure reason'];
+    const wrap = document.createElement('div');
+    wrap.dataset.role = 'agency-history';
+    wrap.style.cssText = 'min-width:0;max-width:100%';
+    const scroller = document.createElement('div');
+    scroller.dataset.role = 'agency-history-scroll';
+    scroller.className = 'ba-transactions-scroll';
+    scroller.style.cssText = 'overflow-x:auto;max-width:100%';
+    const table = document.createElement('table');
+    table.style.cssText = 'border-collapse:collapse;font-size:.75rem;width:100%';
+    const cell = (tag, value) => {
+      const element = document.createElement(tag);
+      element.textContent = value == null ? '' : String(value);
+      element.style.cssText = 'padding:.2rem .4rem;border-bottom:1px solid #d0d4da;white-space:nowrap;text-align:left';
+      return element;
+    };
+    const header = document.createElement('tr');
+    labels.forEach((label) => header.append(cell('th', label)));
+    table.append(header);
+    const amount = (value) => value == null ? '' : `${Number(value).toLocaleString(language === 'fr' ? 'fr-FR' : 'en-US')} XAF`;
+    const fees = (value) => value == null ? '' : `${Number(value).toLocaleString(language === 'fr' ? 'fr-FR' : 'en-US')} XAF`;
+    const row = document.createElement('tr');
+    [transaction.date, transaction.id, transaction.from, transaction.to, transaction.member,
+      transaction.service, transaction.type, amount(transaction.amount), fees(transaction.fees),
+      transaction.reason, transaction.status, transaction.failureReason]
+      .forEach((value) => row.append(cell('td', value)));
+    table.append(row);
+    scroller.append(table);
+    wrap.append(scroller);
+    this.q('messages').append(wrap);
+  }
+
   addClarification(event) {
     const question = this.addMessage('assistant', event.question);
     question.dataset.role = 'clarification-question';
@@ -1874,6 +1909,8 @@ class BankAssistant extends HTMLElement {
           if (ev.reasons?.some((r) => DISPUTE_REASONS.includes(r))) this.disputeLike = true;
         } else if (ev.type === 'tool' && Array.isArray(ev.display?.transactions) && ev.display.transactions.length) {
           this.addTransactions(ev.display.transactions, ev.language);
+        } else if (ev.type === 'agency_history' && ev.transaction) {
+          this.addAgencyHistory(ev.transaction, ev.language);
         } else if (ev.type === 'tool_blocked') {
           if (ev.code === 'session_expired') this.dropSession();
           if (ev.code === 'pin_required') pinNeeded = true;

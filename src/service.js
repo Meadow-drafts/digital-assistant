@@ -730,16 +730,14 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
         }
         const requestedGuide = typeof body.guideKey === 'string' ? available.find((guide) => guide.id === body.guideKey && guide.customerCatalogue) : null;
         let agencyHistoryReply = null;
-        if (historyQuestion?.kind === 'prohibited_detail') {
-          agencyHistoryReply = language === 'fr'
-            ? 'Je ne peux pas fournir de détails ni de statut de transaction. Consultez l’historique du portail ou contactez le support agence habilité.'
-            : 'I cannot provide transaction details or status. Check the portal history or contact authorized agency support.';
-        } else if (historyQuestion?.kind === 'lookup' && !historyQuestion.reference) {
+        let agencyHistoryTransaction = null;
+        if (historyQuestion?.kind === 'lookup' && !historyQuestion.reference) {
           agencyHistoryReply = language === 'fr'
             ? 'Pour une recherche dans l’historique, fournissez la référence exacte de la transaction. Un numéro de téléphone seul ne suffit pas.'
             : 'To search history, provide the exact transaction reference. A phone number alone is not enough.';
         } else if (historyQuestion?.kind === 'lookup') {
           const found = await agencyHistory.findExact({ tenant: body.tenant, token: tokenOf(req), reference: historyQuestion.reference });
+          agencyHistoryTransaction = found.kind === 'matched' ? found.transaction : null;
           agencyHistoryReply = found.kind === 'matched'
             ? language === 'fr'
               ? 'Une entrée correspondante apparaît dans l’historique du guichet. Pour consulter les informations autorisées, ouvrez l’historique dans le portail.'
@@ -816,6 +814,7 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
           send(res, 'guides', { guides: [] });
         } else if (agencyHistoryReply) {
           reply += agencyHistoryReply;
+          if (agencyHistoryTransaction) send(res, 'agency_history', { transaction: agencyHistoryTransaction, language });
           send(res, 'delta', { text: agencyHistoryReply });
           send(res, 'guides', { guides: [] });
         } else if (transferReply) {

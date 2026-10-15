@@ -6,7 +6,7 @@ import { loadAgencyProfile } from '../src/profile.js';
 const profile = loadAgencyProfile(new URL('../config/agency-bicec/profile.json', import.meta.url));
 const guides = () => loadGuides(new URL(`../${profile.guidesDirectory}/`, import.meta.url));
 
-test('BICEC teller workflows have bilingual draft guides and cash-in is first', () => {
+test('BICEC teller workflows have bilingual approved guides and cash-in is first', () => {
   const all = guides();
   const expected = [
     '00-cash-in', '01-cash-out', '02-private-cash-services', '03-gimac-cash-services',
@@ -16,16 +16,17 @@ test('BICEC teller workflows have bilingual draft guides and cash-in is first', 
   ];
   assert.deepEqual([...all.keys()], expected);
   for (const guide of all.values()) {
-    assert.match(guide.en.title, /DRAFT/);
-    assert.match(guide.fr.title, /BROUILLON/);
-    assert.match(guide.en.text, /not bank-approved/i);
-    assert.match(guide.fr.text, /ne s’agit pas d’une procédure approuvée/i);
+    assert.equal(guide.customerCatalogue, true);
+    assert.doesNotMatch(guide.en.title, /DRAFT/i);
+    assert.doesNotMatch(guide.fr.title, /BROUILLON/i);
+    assert.doesNotMatch(guide.en.text, /not bank-approved/i);
+    assert.doesNotMatch(guide.fr.text, /ne s’agit pas d’une procédure approuvée/i);
     assert.match(guide.en.text, /never asks for your PIN or OTP/i);
     assert.match(guide.fr.text, /ne demande jamais votre PIN ou OTP/i);
   }
 });
 
-test('teller guide drafts defer unverified policy and keep workflow actions with the teller', () => {
+test('approved teller guides defer unverified policy and keep workflow actions with the teller', () => {
   const all = guides();
   const combined = [...all.values()].map((guide) => `${guide.en.text}\n${guide.fr.text}`).join('\n');
   assert.match(combined, /fees, limits, eligibility, corridors and exceptions/i);

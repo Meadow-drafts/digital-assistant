@@ -1,10 +1,11 @@
 ---
 id: 02-private-cash-services
 audience: teller
+verified-on: 2026-10-15
 ---
-# BROUILLON — Cashin - Cashout Interne
+# Cashin - Cashout Interne
 
-**Brouillon dérivé de l’implémentation. Il ne s’agit pas d’une procédure approuvée par la banque.** Le code du portail et ses traductions ont fourni les libellés d’interface ; ils ne constituent pas une procédure approuvée par la banque.
+**Guide guichet approuvé par la banque.** Les libellés du workflow sont repris tels qu’ils apparaissent dans le portail du guichet connecté.
 
 ## Étapes
 

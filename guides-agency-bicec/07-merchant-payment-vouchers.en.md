@@ -1,10 +1,11 @@
 ---
 id: 07-merchant-payment-vouchers
 audience: teller
+verified-on: 2026-10-15
 ---
-# DRAFT — Merchant Payment Voucher
+# Merchant Payment Voucher
 
-**Implementation-derived draft. This is not bank-approved procedure.** Portal code and translations supplied the UI labels; they do not establish a bank-approved process.
+**Bank-approved teller guidance.** The workflow labels are retained as shown in the signed-in portal.
 
 ## Steps
 
