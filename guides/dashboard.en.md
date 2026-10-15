@@ -3,7 +3,7 @@ id: dashboard
 audience: individual, merchant
 route: /overview
 package: BALA/SOLDE for balance
-verified-on: DRAFT 2026-10-12, code read only, owner to validate
+verified-on: 2026-10-14, bank approval confirmed by user
 ---
 # Overview: see your balance and spending
 

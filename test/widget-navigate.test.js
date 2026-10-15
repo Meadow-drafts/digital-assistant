@@ -24,24 +24,23 @@ async function setup(t, { answer, message = 'How do I send money?' } = {}) {
   return { a, svc, w, sent, navigations };
 }
 
-test('the card shows the portal page name and an Open and review button, drawn from the validated data', async (t) => {
+test('the validated page action appears as a primary-colored link inside the assistant response', async (t) => {
   const { w } = await setup(t, { answer: '[[navigate:transfer]]Open the Transfers page. <b>Pay now</b>' });
-  await w.until(() => w.q('action-card'));
+  await w.until(() => w.q('approved-answer-link'));
 
-  const card = w.q('action-card');
-  assert.equal(card.dataset.kind, 'navigate');
-  assert.equal(card.dataset.target, 'transfer');
-  assert.equal(card.querySelector('[data-role="action-label"]').textContent, 'Transfer');
-  assert.equal(card.querySelector('button').textContent, 'Click here to send money');
-  assert.equal(card.querySelector('b'), null, 'model text is never rendered as markup');
+  const link = w.q('approved-answer-link');
+  assert.equal(link.textContent, 'Click here to send money');
+  assert.equal(link.closest('[data-role="message"]').dataset.from, 'assistant');
+  assert.equal(w.qa('action-card').length, 0, 'navigation does not add a separate card');
+  assert.equal(w.q('message-content').querySelector('b'), null, 'model text is never rendered as markup');
 });
 
-test('Open and review only asks the host to navigate to the validated path: nothing is sent to the service', async (t) => {
+test('the inline link only asks the host to navigate to the validated path: nothing is sent to the service', async (t) => {
   const { w, sent, navigations } = await setup(t, { answer: '[[navigate:transfer]]Open the Transfers page.' });
-  await w.until(() => w.q('action-card'));
+  await w.until(() => w.q('approved-answer-link'));
   const before = [...sent];
 
-  w.q('action-card').querySelector('button').click();
+  w.q('approved-answer-link').click();
 
   assert.deepEqual(navigations, [{ path: '/transfer', target: 'transfer' }]);
   assert.deepEqual(sent, before, 'no chat, session or other request is made by the click');
@@ -59,8 +58,8 @@ test('a valued payment request navigates without changing any portal form input'
   let fills = 0;
   w.document.addEventListener('bank-assistant:prefill', () => { fills += 1; });
 
-  await w.until(() => w.q('action-card'));
-  w.q('action-card').querySelector('button').click();
+  await w.until(() => w.q('approved-answer-link'));
+  w.q('approved-answer-link').click();
 
   assert.equal(amount.value, '');
   assert.equal(destination.value, '');
@@ -68,13 +67,14 @@ test('a valued payment request navigates without changing any portal form input'
   assert.deepEqual(navigations, [{ path: '/transfer', target: 'transfer' }]);
 });
 
-test('a card with a path that is not a plain portal path is not rendered', async (t) => {
+test('an action with a path that is not a plain portal path is not rendered', async (t) => {
   const { w } = await setup(t, { answer: 'Open the Transfers page.' });
   const el = w.document.querySelector('bank-assistant');
+  const message = el.addMessage('assistant', '');
 
   for (const path of ['https://evil.example/', '//evil.example/', 'javascript:alert(1)', '/transfer?x=1']) {
-    el.addActionCard({ kind: 'navigate', target: 'transfer', path, label: 'Transfer', button: 'Open and review' });
+    assert.equal(el.addActionLink(message, { kind: 'navigate', target: 'transfer', path, label: 'Transfer', button: 'Open and review' }), false);
   }
 
-  assert.equal(w.qa('action-card').length, 0);
+  assert.equal(w.qa('approved-answer-link').length, 0);
 });

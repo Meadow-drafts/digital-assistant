@@ -104,12 +104,13 @@ test('the widget sends only the pathname and capture time to /chat, never query 
   widget.document.body.append(form);
 
   await widget.send('What do I do on this page?');
-  await widget.until(() => widget.q('action-card'));
+  await widget.until(() => widget.q('approved-answer-link'));
 
   const request = widget.net.requests.at(-1);
   assert.deepEqual(request.pageContext && Object.keys(request.pageContext).sort(), ['capturedAt', 'path']);
   assert.equal(request.pageContext.path, '/payments/bill-payment');
   assert.ok(Number.isFinite(Date.parse(request.pageContext.capturedAt)));
   assert.doesNotMatch(JSON.stringify(request), /amount|5000|1234|FORM_VALUE_SENTINEL|pin=/i);
-  assert.equal(widget.q('action-card').dataset.target, 'bill_payment');
+  assert.equal(widget.q('approved-answer-link').dataset.target, 'bill_payment');
+  assert.equal(widget.qa('action-card').length, 0);
 });

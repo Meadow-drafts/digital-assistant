@@ -3,7 +3,7 @@ id: merchant-payment
 audience: individual
 route: /payments
 package: PALO, PACE, PACEI, PAIM, GPAY, DDPA, DDPC (per tab)
-verified-on: DRAFT 2026-10-12, code read only, owner to validate
+verified-on: 2026-10-14, bank approval confirmed by user
 ---
 # Pay a merchant by code or by QR code
 

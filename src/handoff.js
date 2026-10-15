@@ -320,6 +320,10 @@ export function createHandoff({ identity, database, clock, audit, failedQuestion
     const after = Number.parseInt(url.searchParams.get('after') ?? '0', 10) || 0;
     // The customer receives the agent's words; their own side is already on their screen.
     const messages = c.transcript.filter((m) => (m.from === 'agent' || m.public) && m.seq > after).map(({ seq, from, text }) => ({ seq, from, text }));
+    if (url.searchParams.get('read') === '1') {
+      const lastRead = Math.min(c.transcript.length, Math.max(after, ...messages.map((message) => message.seq), 0));
+      if (lastRead > (c.customerReadSeq ?? 0)) c.customerReadSeq = lastRead;
+    }
     json(res, 200, { ...view(c), messages, next: c.transcript.length });
   }
 
@@ -331,7 +335,10 @@ export function createHandoff({ identity, database, clock, audit, failedQuestion
   const updatedAtOf = (c) => Math.max(c.openedAt, c.claimedAt ?? 0, c.resolvedAt ?? 0, c.reopenedAt ?? 0,
     ...(c.transfers ?? []).map((transfer) => transfer.at), ...c.transcript.filter((m) => m.from !== 'system' || m.public).map((m) => m.at));
   const iso = (ms) => new Date(ms).toISOString();
-  const myCaseView = (c) => ({ ref: c.ref, state: customerState(c), openedAt: iso(c.openedAt), updatedAt: iso(updatedAtOf(c)) });
+  const myCaseView = (c) => ({
+    ref: c.ref, state: customerState(c), openedAt: iso(c.openedAt), updatedAt: iso(updatedAtOf(c)),
+    ...(handle.unreadReplyFor(c.conversationId, c.owner) ?? {}),
+  });
   // A closed case is listed for the retention period (measured like the purge job, so the two never disagree between runs);
   // a case still open is live work and is always listed. An email-only case is listed as 'emailed': it has a reference and
   // a date, but no chat and no progress to follow, and it expires like a closed case.
@@ -784,6 +791,15 @@ export function createHandoff({ identity, database, clock, audit, failedQuestion
   handle.waitingCaseFor = (conversationId) => {
     const c = store.latestFor(conversationId);
     return c?.state === 'waiting' ? c : null;
+  };
+  // Only the customer-facing list handlers call this after filtering conversations/cases by the signed owner.
+  // The read cursor is stored with the case so the unread state survives a widget close and a service restart.
+  handle.unreadReplyFor = (conversationId, owner) => {
+    const c = store.latestFor(conversationId);
+    if (!c || c.owner !== owner) return null;
+    const latest = [...c.transcript].reverse().find((message) => message.from === 'agent');
+    if (!latest || latest.seq <= (c.customerReadSeq ?? 0)) return null;
+    return { unreadReply: true, latestAgentReplyAt: new Date(latest.at).toISOString() };
   };
   handle.mirrorTurn = (c, question, answer) => {
     add(c, 'customer', question);

@@ -3,7 +3,7 @@ id: account-info
 audience: individual, merchant
 route: /consultations
 package: none (HIST gates history)
-verified-on: DRAFT 2026-10-12, code read only, owner to validate
+verified-on: 2026-10-14, bank approval confirmed by user
 ---
 # See your accounts, balance, RIB/IBAN and account actions
 

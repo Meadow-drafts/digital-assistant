@@ -22,6 +22,7 @@ import { createRetention } from './retention.js';
 import { asksAboutCurrentPage, verifiedPageContext } from './page-context.js';
 import { commonVerifiedStep } from './guides.js';
 import { socialKind, socialReply } from './social.js';
+import { maskText } from './mask.js';
 
 const PUBLIC = new URL('../public/', import.meta.url);
 // Only these files are served; no user-controlled path ever reaches the disk.
@@ -335,12 +336,39 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
       airtime: { en: 'Get help buying airtime', fr: 'Obtenir de l’aide pour acheter du crédit téléphonique' },
       request_to_pay: { en: 'Get help with payment requests', fr: 'Obtenir de l’aide sur les demandes de paiement' },
     };
-    const context = route && contextGuides.length ? {
+    const context = route ? {
       label: route[1].labels[lang] ?? route[1].labels.en,
-      description: contextDescriptions[route[0]]?.[lang] ?? (lang === 'fr' ? 'Consulter les conseils pour cette page' : 'See guidance for this page'),
+      description: contextGuides.length
+        ? contextDescriptions[route[0]]?.[lang] ?? (lang === 'fr' ? 'Consulter les conseils pour cette page' : 'See guidance for this page')
+        : (lang === 'fr' ? 'Posez une question sur cette page' : 'Ask a question about this page'),
       topics: contextGuides.map((guide) => ({ key: guide.id, title: guide[lang].title })),
     } : null;
     reply(200, { topics, context });
+  }
+
+  // A customer may reopen only their own saved conversation. Return the masked
+  // transcript and a short display preview; never expose internal state/session data.
+  async function handleConversationHistory(req, res, conversationId = null) {
+    const reply = (status, payload) => res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(payload));
+    const who = identity.resolve(req);
+    if (who.error || !who.verified) { reply(401, { error: who.error ?? 'session_required' }); return; }
+    if (conversationId === null) {
+      const rows = conversations.listForOwner(who.owner).map((conversation) => ({
+        ...conversation,
+        ...(handoff.unreadReplyFor(conversation.id, who.owner) ?? {}),
+      }));
+      reply(200, { conversations: rows }); return;
+    }
+    const conversation = conversations.get(conversationId);
+    if (!conversation || conversation.owner !== who.owner || !conversation.history.some((message) => message.role === 'user')) {
+      reply(404, { error: 'not_found' }); return;
+    }
+    reply(200, {
+      id: conversationId,
+      lastActiveAt: new Date(conversation.lastActiveAt ?? 0).toISOString(),
+      messages: conversation.history.slice(-100).map(({ role, content }) => ({ role, text: maskText(content) })),
+      truncated: conversation.history.length > 100,
+    });
   }
 
   // Turns by owner and message id, so a retry after a dropped connection gets the same reply instead of a second run
@@ -882,6 +910,17 @@ export function createService({ allowedOrigins = [], devPage, model, gateway, cl
     }
     if (req.method === 'GET' && req.url.startsWith('/help/topics?')) {
       handleHelpTopics(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end(); });
+      return;
+    }
+    if (req.method === 'GET' && req.url === '/conversations') {
+      handleConversationHistory(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end(); });
+      return;
+    }
+    const conversationMatch = req.method === 'GET' && /^\/conversations\/([^/?]+)$/.exec(req.url);
+    if (conversationMatch) {
+      let conversationId;
+      try { conversationId = decodeURIComponent(conversationMatch[1]); } catch { res.writeHead(404).end(); return; }
+      handleConversationHistory(req, res, conversationId).catch(() => { if (!res.headersSent) res.writeHead(500); res.end(); });
       return;
     }
     const file = req.method === 'GET' ? STATIC[req.url.split('?')[0]] : undefined;

@@ -84,6 +84,20 @@ test('a case the customer cancelled is shown as cancelled, and an automatic reso
   assert.equal((await entry(b, ref)).state, 'resolved');
 });
 
+test('an agent reply to a case is marked unread until the customer opens that conversation', async (t) => {
+  const { svc, a } = await twoCustomers(t, { agents: LONG_SESSION });
+  const ref = (await a.handoff()).body.ref;
+  const aline = await agentLogin(svc.baseUrl, 'aline');
+  await aline.claim(ref);
+
+  await aline.reply(ref, 'I have checked your transfer and will update you shortly.');
+  assert.equal((await entry(a, ref)).unreadReply, true, 'the case list marks the new agent reply unread');
+
+  const opened = await call(svc.baseUrl, 'GET', `/case?conversationId=${encodeURIComponent(a.conversationId)}&after=0&read=1`, { token: a.token });
+  assert.equal(opened.body.messages.at(-1).text, 'I have checked your transfer and will update you shortly.');
+  assert.equal((await entry(a, ref)).unreadReply, undefined, 'opening the conversation clears its unread marker');
+});
+
 async function resolvedThen(t, wait) {
   const ctx = await twoCustomers(t, { agents: LONG_SESSION });
   const aline = await agentLogin(ctx.svc.baseUrl, 'aline');

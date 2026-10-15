@@ -64,6 +64,20 @@ export function createConversationStore({ database = null } = {}) {
   return {
     get: (id) => map.get(id),
     has: (id) => map.has(id),
+    listForOwner(owner, limit = 50) {
+      return [...map.entries()]
+        .filter(([, conversation]) => conversation.owner === owner && conversation.history.some((message) => message.role === 'user'))
+        .sort(([, a], [, b]) => (b.lastActiveAt ?? 0) - (a.lastActiveAt ?? 0))
+        .slice(0, limit)
+        .map(([id, conversation]) => {
+          const lastUser = [...conversation.history].reverse().find((message) => message.role === 'user');
+          return {
+            id,
+            lastActiveAt: new Date(conversation.lastActiveAt ?? 0).toISOString(),
+            preview: maskText(lastUser?.content ?? '').slice(0, 180),
+          };
+        });
+    },
     set(id, conversation) { map.set(id, conversation); markDirty(id); return this; },
     // Call after changing a conversation that is already stored (a new turn, a language change).
     save: (id) => { if (map.has(id)) markDirty(id); },

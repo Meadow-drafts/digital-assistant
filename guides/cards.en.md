@@ -3,7 +3,7 @@ id: cards
 audience: individual, merchant
 route: /consultations
 package: none
-verified-on: DRAFT 2026-10-13, code read only, owner to validate
+verified-on: 2026-10-14, bank approval confirmed by user
 ---
 # See your cards and their status
 

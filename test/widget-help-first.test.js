@@ -6,6 +6,9 @@ import { alice, bob, open as openSession, start } from './harness/t1-helpers.js'
 import { createGuideModel } from './harness/guide-model.js';
 import { GUIDES } from './harness/t1-helpers.js';
 import { loadGuides } from '../src/guides.js';
+import { chatTurn } from './harness/sse.js';
+import { rawFetch } from './harness/session-fetch.js';
+import { agentLogin } from './harness/cases.js';
 
 async function signedWidget(t, { gating = { usePackages: false }, path = '/', customerCatalogue = [], contextRoutes = {} } = {}) {
   const customer = alice();
@@ -64,7 +67,23 @@ test('the search focus uses a soft focus treatment and contextual help describes
   const styles = w.document.querySelector('bank-assistant style').textContent;
   assert.match(styles, /\.ba-search:focus-within[^}]*box-shadow/);
   assert.match(styles, /\.ba-compose form:focus-within[^}]*box-shadow/);
+  assert.match(styles, /\.ba-transactions-scroll[^}]*scrollbar-width:thin/);
+  assert.match(styles, /\.ba-chips[^}]*scrollbar-width:thin/);
   assert.doesNotMatch(styles, /input:focus-visible\s*\{\s*outline:3px solid #e7a563/);
+});
+
+test('a known page without a published guide still shows a generic, editable contextual prompt', async (t) => {
+  const { w } = await signedWidget(t);
+  w.dom.window.history.pushState({}, '', '/overview');
+  await w.until(() => w.q('topics').getAttribute('aria-busy') === 'false');
+  assert.equal(w.q('context-card').hidden, false);
+  assert.equal(w.q('context-title').textContent, 'Quick help for Overview');
+  assert.equal(w.q('context-copy').textContent, 'Ask a question about this page');
+  assert.ok(w.q('context-card').querySelector('[data-role="context-icon"]'));
+  assert.ok(w.q('context-card').querySelector('[data-role="context-arrow"]'));
+  w.q('context-button').click();
+  assert.equal(w.q('input').value, 'How can I use the Overview page?');
+  assert.equal(w.net.requests.some((request) => request.message === w.q('input').value), false, 'the prompt is not sent automatically');
 });
 
 test('eligible catalogue filtering happens before search, and route context refreshes after navigation', async (t) => {
@@ -81,7 +100,10 @@ test('eligible catalogue filtering happens before search, and route context refr
   assert.equal(w.q('context-copy').textContent, 'See balance and recent activity guidance');
 
   w.dom.window.history.pushState({}, '', '/transfer');
-  await w.until(() => w.q('context-card').hidden);
+  await w.until(() => w.q('topics').getAttribute('aria-busy') === 'false');
+  assert.equal(w.q('context-card').hidden, false);
+  assert.match(w.q('context-title').textContent, /Transfer/);
+  assert.equal(w.q('context-copy').textContent, 'Ask a question about this page', 'the package-locked guide is replaced by generic page help');
 
   w.q('topic-search').value = 'single transfer';
   w.q('topic-search').dispatchEvent(new w.dom.window.Event('input'));
@@ -147,8 +169,72 @@ test('New chat starts a separate conversation while the prior case remains disco
   w.q('menu-cases').click();
   await w.until(() => !w.q('my-cases-panel').hidden && !w.q('my-cases-loading').textContent);
   assert.ok(newId);
-  assert.deepEqual([...w.q('menu').querySelectorAll('button')].map((button) => button.textContent), ['My cases', 'Help topics']);
+  assert.deepEqual([...w.q('menu').querySelectorAll('button')].map((button) => button.textContent), ['My cases', 'Chat history', 'Help topics']);
   assert.equal(w.qa('my-case').length, 1);
+});
+
+test('chat history lists past conversations by recent activity and resumes the selected thread', async (t) => {
+  const { svc, w } = await signedWidget(t);
+  await w.send('How do I check my account balance?');
+  await w.until(() => w.q('thinking').hidden && w.qa('message').some((message) => message.dataset.from === 'assistant'));
+  const firstId = w.document.querySelector('bank-assistant').conversationId;
+  w.q('new-chat').click();
+  await svc.clock.advance(1000);
+  await w.send('How do I find a transfer?');
+  await w.until(() => w.q('thinking').hidden && w.qa('message').some((message) => message.dataset.from === 'assistant'));
+  const secondId = w.document.querySelector('bank-assistant').conversationId;
+
+  w.q('more').click();
+  w.q('menu-history').click();
+  await w.until(() => !w.q('history-loading').textContent);
+  const rows = w.qa('conversation-row');
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].dataset.conversationId, secondId, 'most recently active appears first');
+  assert.match(rows[0].textContent, /How do I find a transfer/);
+  assert.match(rows[0].textContent, /2026/);
+
+  rows.find((row) => row.dataset.conversationId === firstId).click();
+  await w.until(() => w.document.querySelector('bank-assistant').conversationId === firstId && w.q('history-panel').hidden);
+  assert.match(w.qa('message').find((message) => message.dataset.from === 'user').textContent, /check my account balance/);
+  await w.send('And can I see recent transactions?');
+  await w.until(() => w.q('thinking').hidden && w.net.requests.at(-1)?.message === 'And can I see recent transactions?');
+  assert.equal(w.net.requests.at(-1).conversationId, firstId, 'a follow-up continues the selected conversation');
+});
+
+test('chat history marks an agent reply unread and clears it when the customer resumes the thread', async (t) => {
+  const { svc, w } = await signedWidget(t);
+  await w.send('I need help with a transfer.');
+  await w.until(() => w.q('thinking').hidden && w.qa('message').some((message) => message.dataset.from === 'assistant'));
+  w.document.querySelector('bank-assistant').setAttribute('poll-ms', '60000');
+  w.q('human-chip').click();
+  await w.until(() => !w.q('case-banner').hidden);
+  const conversationId = w.document.querySelector('bank-assistant').conversationId;
+  const ref = /C-\d+/.exec(w.q('case-ref').textContent)[0];
+  w.q('new-chat').click();
+  await w.until(() => w.document.querySelector('bank-assistant').conversationId && w.document.querySelector('bank-assistant').conversationId !== conversationId);
+  const aline = await agentLogin(svc.baseUrl);
+  await aline.claim(ref);
+  await aline.reply(ref, 'I checked the transfer. You can continue here if you need more help.');
+
+  w.q('more').click();
+  w.q('menu-history').click();
+  await w.until(() => !w.q('history-loading').textContent);
+  const row = w.qa('conversation-row').find((item) => item.dataset.conversationId === conversationId);
+  assert.match(row.textContent, /Agent replied/);
+  assert.match(row.textContent, /2026/);
+  assert.match(w.q('menu-history').textContent, /1 new reply/);
+  assert.match(w.q('menu-cases').textContent, /1 new reply/);
+
+  row.click();
+  await w.until(() => w.q('history-panel').hidden && w.qa('message').some((message) => message.dataset.from === 'agent'));
+  assert.match(w.qa('message').find((message) => message.dataset.from === 'agent').textContent, /I checked the transfer/);
+
+  w.q('more').click();
+  w.q('menu-history').click();
+  await w.until(() => !w.q('history-loading').textContent);
+  const resumed = w.qa('conversation-row').find((item) => item.dataset.conversationId === conversationId);
+  assert.doesNotMatch(resumed.textContent, /Agent replied/);
+  await w.until(() => !/new reply/.test(w.q('menu-history').textContent));
 });
 
 test('French welcome controls have labels, and the panel uses mobile safe-area sizing', async (t) => {
@@ -186,7 +272,8 @@ test('the read-only catalogue requires an owned signed session and returns only 
   assert.deepEqual(body.topics.map((topic) => topic.key), ['my-cases']);
   assert.deepEqual(Object.keys(body.topics[0]).sort(), ['key', 'title']);
   assert.equal(body.topics[0].title, 'Suivre vos dossiers');
-  assert.equal(body.context, null, 'draft Overview guide is not disclosed as contextual help');
+  assert.deepEqual(body.context.topics, [], 'draft Overview guide is not disclosed in contextual help');
+  assert.equal(body.context.description, 'Posez une question sur cette page');
 
   const strangerSession = await openSession(svc, stranger, { gating: { usePackages: false, audience: 'individual' } });
   const denied = await fetch(`${svc.baseUrl}/help/topics?language=en&conversationId=${session.conversationId}`, {
@@ -199,4 +286,43 @@ test('the read-only catalogue requires an owned signed session and returns only 
     headers: { authorization: `Bearer ${customer.token}`, 'x-assistant-session': merchantSession.sessionId },
   });
   assert.deepEqual((await merchantResponse.json()).topics, [], 'individual-only verified topics are hidden from merchant users');
+});
+
+test('conversation history requires a verified owner and returns only masked transcript text', async (t) => {
+  const customer = alice();
+  const stranger = bob();
+  const svc = await start({ customers: [customer, stranger] });
+  t.after(svc.close);
+  const ownerSession = await openSession(svc, customer);
+  const id = ownerSession.conversationId;
+  const turn = await chatTurn(svc.baseUrl, { message: 'My account is 12345678901. How do I check it?', conversationId: id, tenant: 'demo' }, {
+    token: customer.token, headers: { 'x-assistant-session': ownerSession.sessionId },
+  });
+  assert.equal(turn.status, 200);
+
+  const noSession = await rawFetch(`${svc.baseUrl}/conversations`, { headers: { authorization: `Bearer ${customer.token}` } });
+  assert.equal(noSession.status, 401);
+  const listed = await rawFetch(`${svc.baseUrl}/conversations`, {
+    headers: { authorization: `Bearer ${customer.token}`, 'x-assistant-session': ownerSession.sessionId },
+  });
+  const list = await listed.json();
+  assert.equal(list.conversations.length, 1);
+  assert.equal(list.conversations[0].id, id);
+  assert.match(list.conversations[0].preview, /\*\*\*\*8901/);
+  assert.doesNotMatch(JSON.stringify(list), /12345678901/);
+
+  const detail = await rawFetch(`${svc.baseUrl}/conversations/${encodeURIComponent(id)}`, {
+    headers: { authorization: `Bearer ${customer.token}`, 'x-assistant-session': ownerSession.sessionId },
+  });
+  const transcript = await detail.json();
+  assert.equal(transcript.messages[0].role, 'user');
+  assert.match(transcript.messages[0].text, /\*\*\*\*8901/);
+  assert.doesNotMatch(JSON.stringify(transcript), /12345678901/);
+
+  const strangerSession = await openSession(svc, stranger);
+  const strangerHeaders = { authorization: `Bearer ${stranger.token}`, 'x-assistant-session': strangerSession.sessionId };
+  const strangerList = await rawFetch(`${svc.baseUrl}/conversations`, { headers: strangerHeaders });
+  assert.deepEqual((await strangerList.json()).conversations, []);
+  const denied = await rawFetch(`${svc.baseUrl}/conversations/${encodeURIComponent(id)}`, { headers: strangerHeaders });
+  assert.equal(denied.status, 404);
 });

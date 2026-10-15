@@ -32,18 +32,18 @@ const COPY = {
 };
 
 for (const lang of ['en', 'fr']) {
-  test(`${lang.toUpperCase()}: the History next step is drawn as the same action card as any link card, and clicking it only asks the host to navigate`, async (t) => {
+  test(`${lang.toUpperCase()}: the History next step is an inline answer link and clicking it only asks the host to navigate`, async (t) => {
     const { w, navigations } = await setup(t, { gating: WITH_HIST, message: MESSAGE[lang] });
-    await w.until(() => w.q('action-card'));
+    await w.until(() => w.qa('approved-answer-link').length);
 
-    const cards = w.qa('action-card');
-    assert.equal(cards.length, 1);
-    assert.equal(cards[0].dataset.kind, 'navigate');
-    assert.equal(cards[0].dataset.target, 'history');
-    assert.equal(cards[0].querySelector('[data-role="action-label"]').textContent, COPY[lang].label);
-    assert.equal(cards[0].querySelector('button').textContent, COPY[lang].button);
+    const links = w.qa('approved-answer-link');
+    assert.equal(links.length, 1);
+    assert.equal(links[0].dataset.target, 'history');
+    assert.equal(links[0].textContent, COPY[lang].button);
+    assert.equal(links[0].closest('[data-role="message"]').dataset.from, 'assistant');
+    assert.equal(w.qa('action-card').length, 0);
 
-    cards[0].querySelector('button').click();
+    links[0].click();
     assert.deepEqual(navigations, [{ path: '/history', target: 'history' }]);
   });
 

@@ -105,6 +105,21 @@ test('"My cases" lists the customer\'s own cases newest first: reference, opened
   assert.equal(updated.getAttribute('datetime'), '2026-10-12T09:00:00.000Z', 'claimed at the moment it opened');
 });
 
+test('My cases marks an unread agent response with its reply time', async (t) => {
+  const { svc, a, caseFor } = await world(t);
+  const opened = await caseFor(a);
+  const aline = await agentLogin(svc.baseUrl, 'aline');
+  await aline.claim(opened.ref);
+  await aline.reply(opened.ref, 'I checked this for you.');
+  const w = await widgetFor(svc, t, a);
+
+  await openList(w);
+  const row = rows(w).find((item) => item.textContent.includes(opened.ref));
+  assert.match(row.textContent, /Agent replied/);
+  assert.match(row.textContent, /2026/);
+  assert.ok(row.querySelector('[data-role="unread-reply"]'));
+});
+
 test('the widget sends the signed session id it was given on the list call, and it is not the token', async (t) => {
   const { svc, a } = await world(t);
   const w = await widgetFor(svc, t, a);

@@ -3,7 +3,7 @@ id: history-statement
 audience: individual, merchant (Account History: primary connect only)
 route: /history/account
 package: HIST
-verified-on: DRAFT 2026-10-12, code read only, owner to validate
+verified-on: 2026-10-14, bank approval confirmed by user
 ---
 # Get an account statement
 

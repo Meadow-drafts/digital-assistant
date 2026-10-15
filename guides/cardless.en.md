@@ -3,7 +3,7 @@ id: cardless
 audience: individual
 route: /vouchers/cardless-withdrawal
 package: RSCA (withdraw), ANCV (cancel)
-verified-on: DRAFT 2026-10-12, code read only, owner to validate
+verified-on: 2026-10-14, bank approval confirmed by user
 ---
 # Cardless withdrawal
 

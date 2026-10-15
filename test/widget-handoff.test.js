@@ -55,13 +55,13 @@ test('while waiting, assistant replies are labelled as automated replies', async
   const svc = await startService({ model: createFakeModel(['Hi there.', 'Open Transfers.']) });
   t.after(svc.close);
   const w = await askForAgent(svc, t);
-
   await w.send('How do I pay a bill?');
   await w.until(() => w.qa('message').filter((m) => m.dataset.from === 'assistant').length === 2);
 
   assert.equal(w.qa('automated-label').length, 1);
   assert.match(w.q('automated-label').textContent, /automated reply/i);
-  assert.match(w.q('automated-label').nextElementSibling.textContent, /^Open Transfers\./);
+  assert.ok(w.q('automated-label').closest('[data-role="message"]'), 'the small label belongs inside its assistant response bubble');
+  assert.match(w.q('automated-label').parentElement.textContent, /Open Transfers\./);
 });
 
 test('once an agent claims, the banner shows the agent first name and a human agent badge, and the bot is muted', async (t) => {
@@ -103,7 +103,7 @@ test('the agent\'s messages arrive in the same chat, marked as the human agent',
   await w.until(() => w.qa('message').some((m) => m.dataset.from === 'agent'));
 
   const message = w.qa('message').find((m) => m.dataset.from === 'agent');
-  assert.equal(message.textContent, 'Hello, I am looking at your transfer now.');
+  assert.equal(message.querySelector('[data-role="message-content"]').textContent, 'Hello, I am looking at your transfer now.');
   assert.equal(w.qa('message').filter((m) => m.dataset.from === 'agent').length, 1, 'each message shown once, not on every poll');
 });
 

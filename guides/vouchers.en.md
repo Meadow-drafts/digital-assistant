@@ -3,7 +3,7 @@ id: vouchers
 audience: individual (generate, cancel); merchant (consume, see UNSUPPORTED note)
 route: /vouchers
 package: CAOUT
-verified-on: DRAFT 2026-10-12, code read only, owner to validate
+verified-on: 2026-10-14, bank approval confirmed by user
 ---
 # Generate or cancel a cash-out voucher code
 

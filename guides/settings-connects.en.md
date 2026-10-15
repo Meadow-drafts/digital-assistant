@@ -3,7 +3,7 @@ id: settings-connects
 audience: individual (primary connect only)
 route: /settings
 package: none
-verified-on: DRAFT 2026-10-12, code read only, owner to validate
+verified-on: 2026-10-14, bank approval confirmed by user
 ---
 # Change which connect is the primary connect
 
